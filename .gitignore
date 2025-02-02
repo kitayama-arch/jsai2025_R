@@ -1,3 +1,11 @@
 .RData
 .Rhistory
 .DS_Store
+*.html
+*.pdf
+Rplots.pdf
+.Rproj.user/
+*.png
+*_files/
+*.rds
+workspace.RData
