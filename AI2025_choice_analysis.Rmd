@@ -1,0 +1,403 @@
+---
+title: "AI2025実験：選択行動分析"
+author: "AI学会実験チーム"
+date: "`r format(Sys.time(), '%Y-%m-%d')`"
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+    theme: united
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+
+# 必要なパッケージのインストール（必要な場合のみ実行）
+if (!require("tidyverse")) install.packages("tidyverse")
+if (!require("kableExtra")) install.packages("kableExtra")
+if (!require("effectsize")) install.packages("effectsize")
+if (!require("broom")) install.packages("broom")
+
+# パッケージの読み込み
+library(tidyverse)
+library(kableExtra)
+library(effectsize)
+library(broom)
+```
+
+# データの読み込みと前処理
+
+```{r load-data}
+# AI条件のデータ読み込み
+ai_data_1 <- read_csv("AI2025_data/20250117_3/dictator_app_2025-01-17.csv", show_col_types = FALSE)
+ai_data_2 <- read_csv("AI2025_data/20250120_5/dictator_app_2025-01-20.csv", show_col_types = FALSE)
+
+# コントロール条件のデータ読み込み
+control_data_1 <- read_csv("AI2025_data/20250117_4/Base_dictator_app_2025-01-17.csv", show_col_types = FALSE)
+control_data_2 <- read_csv("AI2025_data/20250120_4/Base_dictator_app_2025-01-20.csv", show_col_types = FALSE)
+
+# データの結合と前処理
+df <- bind_rows(
+  mutate(ai_data_1, condition = "AI"),
+  mutate(ai_data_2, condition = "AI"),
+  mutate(control_data_1, condition = "Control"),
+  mutate(control_data_2, condition = "Control")
+) %>%
+  filter(participant.visited == 1) %>%
+  filter(!(condition == "Control" & subsession.round_number == 16)) %>%
+  mutate(choice_x = as.numeric(player.choice == "X"))  # 選択を数値型に変換
+
+print("【データセットの基本情報】")
+cat(sprintf("総サンプルサイズ: %d\n", nrow(df)))
+cat(sprintf("AI条件のサンプル数: %d\n", sum(df$condition == "AI")))
+cat(sprintf("Control条件のサンプル数: %d\n", sum(df$condition == "Control")))
+```
+
+# 全体の選択行動分析
+
+## 条件別の選択率分析
+
+```{r choice-analysis}
+# 条件別の選択率計算
+choice_rates <- df %>%
+  group_by(condition) %>%
+  summarise(
+    n_total = n(),
+    n_x = sum(choice_x),
+    x_rate = mean(choice_x),
+    se = sqrt(x_rate * (1 - x_rate) / n_total)
+  )
+
+print("【条件別の選択率】")
+as.data.frame(choice_rates) %>% print(row.names = FALSE)
+
+kable(choice_rates, 
+      caption = "条件別の選択率",
+      digits = 3) %>%
+  kable_styling()
+
+# 条件間の選択率の差の検定
+choice_test <- t.test(
+  choice_x ~ condition,
+  data = df,
+  var.equal = FALSE
+)
+
+print("\n【t検定の結果】")
+print(choice_test)
+
+# 効果量の計算
+effect_size <- cohens_d(
+  choice_x ~ condition,
+  data = df
+)
+
+print("\n【効果量】")
+print(effect_size)
+
+# 効果量の結果表示
+effect_size_table <- tibble(
+  効果量 = "Cohen's d",
+  推定値 = effect_size$Cohens_d,
+  信頼区間下限 = effect_size$CI_low,
+  信頼区間上限 = effect_size$CI_high
+)
+
+kable(effect_size_table,
+      caption = "効果量（Cohen's d）",
+      digits = 3) %>%
+  kable_styling()
+```
+
+## 利害対立状況での選択行動
+
+```{r conflict-analysis}
+# 利害対立状況の定義
+df_conflict <- df %>%
+  group_by(participant.code) %>%
+  mutate(
+    payoff_diff = player.payoff_dictator - player.payoff_receiver,
+    is_conflict = payoff_diff > 0  # 独裁者の利得が受け手の利得より大きい場合
+  )
+
+print("【利害対立状況の基本統計量】")
+df_conflict %>%
+  group_by(condition, is_conflict) %>%
+  summarise(
+    n = n(),
+    mean_payoff_diff = mean(payoff_diff),
+    sd_payoff_diff = sd(payoff_diff),
+    .groups = "drop"
+  ) %>%
+  as.data.frame() %>%
+  print(row.names = FALSE)
+
+# 利害対立状況での選択率分析
+conflict_rates <- df_conflict %>%
+  filter(is_conflict) %>%
+  group_by(condition) %>%
+  summarise(
+    n_total = n(),
+    n_x = sum(choice_x),
+    x_rate = mean(choice_x),
+    se = sqrt(x_rate * (1 - x_rate) / n_total)
+  )
+
+print("\n【利害対立状況での選択率】")
+as.data.frame(conflict_rates) %>% print(row.names = FALSE)
+
+# 結果の表示
+kable(conflict_rates,
+      caption = "利害対立状況での選択率",
+      digits = 3) %>%
+  kable_styling()
+
+# 利害対立状況での条件間差の検定
+conflict_test <- df_conflict %>%
+  filter(is_conflict) %>%
+  {t.test(
+    choice_x ~ condition,
+    data = .,
+    var.equal = FALSE
+  )}
+
+print("\n【利害対立状況でのt検定結果】")
+print(conflict_test)
+
+# 利害対立状況での効果量
+conflict_effect <- df_conflict %>%
+  filter(is_conflict) %>%
+  {cohens_d(
+    choice_x ~ condition,
+    data = .
+  )}
+
+print("\n【利害対立状況での効果量】")
+print(conflict_effect)
+
+# 効果量の結果表示
+conflict_effect_table <- tibble(
+  効果量 = "Cohen's d（利害対立状況）",
+  推定値 = conflict_effect$Cohens_d,
+  信頼区間下限 = conflict_effect$CI_low,
+  信頼区間上限 = conflict_effect$CI_high
+)
+
+kable(conflict_effect_table,
+      caption = "利害対立状況での効果量（Cohen's d）",
+      digits = 3) %>%
+  kable_styling()
+```
+
+# ゲームタイプ別分析
+
+## 有利不平等・不利不平等状況の分析
+
+```{r inequality-analysis}
+# 不平等状況の定義
+df_inequality <- df %>%
+  mutate(
+    adv_inequality = player.payoff_dictator > player.payoff_receiver,
+    disadv_inequality = player.payoff_receiver > player.payoff_dictator
+  )
+
+print("【不平等状況の基本統計量】")
+df_inequality %>%
+  group_by(condition) %>%
+  summarise(
+    n_total = n(),
+    n_adv = sum(adv_inequality),
+    n_disadv = sum(disadv_inequality),
+    prop_adv = mean(adv_inequality),
+    prop_disadv = mean(disadv_inequality)
+  ) %>%
+  print()
+
+# 有利不平等状況での分析
+adv_rates <- df_inequality %>%
+  filter(adv_inequality) %>%
+  group_by(condition) %>%
+  summarise(
+    n_total = n(),
+    n_x = sum(choice_x),
+    x_rate = mean(choice_x),
+    se = sqrt(x_rate * (1 - x_rate) / n_total)
+  )
+
+print("\n【有利不平等状況での選択率】")
+print(adv_rates)
+
+# 不利不平等状況での分析
+disadv_rates <- df_inequality %>%
+  filter(disadv_inequality) %>%
+  group_by(condition) %>%
+  summarise(
+    n_total = n(),
+    n_x = sum(choice_x),
+    x_rate = mean(choice_x),
+    se = sqrt(x_rate * (1 - x_rate) / n_total)
+  )
+
+print("\n【不利不平等状況での選択率】")
+print(disadv_rates)
+
+# 結果の表示（有利不平等）
+kable(adv_rates,
+      caption = "有利不平等状況での選択率",
+      digits = 3) %>%
+  kable_styling()
+
+# 結果の表示（不利不平等）
+kable(disadv_rates,
+      caption = "不利不平等状況での選択率",
+      digits = 3) %>%
+  kable_styling()
+
+# 不平等状況での効果量
+adv_effect <- df_inequality %>%
+  filter(adv_inequality) %>%
+  {cohens_d(
+    choice_x ~ condition,
+    data = .
+  )}
+
+print("\n【有利不平等状況での効果量】")
+print(adv_effect)
+
+disadv_effect <- df_inequality %>%
+  filter(disadv_inequality) %>%
+  {cohens_d(
+    choice_x ~ condition,
+    data = .
+  )}
+
+print("\n【不利不平等状況での効果量】")
+print(disadv_effect)
+
+# 効果量の結果表示
+inequality_effect_table <- tibble(
+  状況 = c("有利不平等", "不利不平等"),
+  効果量 = c(adv_effect$Cohens_d, disadv_effect$Cohens_d),
+  信頼区間下限 = c(adv_effect$CI_low, disadv_effect$CI_low),
+  信頼区間上限 = c(adv_effect$CI_high, disadv_effect$CI_high)
+)
+
+kable(inequality_effect_table,
+      caption = "不平等状況での効果量（Cohen's d）",
+      digits = 3) %>%
+  kable_styling()
+
+# 不平等状況での選択率の可視化
+inequality_plot_data <- bind_rows(
+  mutate(adv_rates, type = "有利不平等"),
+  mutate(disadv_rates, type = "不利不平等")
+)
+
+ggplot(inequality_plot_data, 
+       aes(x = condition, y = x_rate, fill = type)) +
+  geom_bar(stat = "identity", position = "dodge", alpha = 0.7) +
+  geom_errorbar(aes(ymin = x_rate - se, ymax = x_rate + se),
+                position = position_dodge(width = 0.9),
+                width = 0.2) +
+  labs(
+    title = "不平等状況での選択率",
+    x = "条件",
+    y = "X選択率",
+    fill = "不平等タイプ"
+  ) +
+  theme_minimal() +
+  scale_y_continuous(limits = c(0, 1)) +
+  scale_fill_brewer(palette = "Set2")
+```
+
+# 視覚化
+
+## 条件別選択率の可視化
+
+```{r visualization}
+# 全体の選択率プロット
+ggplot(choice_rates, aes(x = condition, y = x_rate)) +
+  geom_bar(stat = "identity", fill = "steelblue", alpha = 0.7) +
+  geom_errorbar(aes(ymin = x_rate - se, ymax = x_rate + se), width = 0.2) +
+  labs(
+    title = "条件別のX選択率",
+    x = "条件",
+    y = "X選択率"
+  ) +
+  theme_minimal() +
+  scale_y_continuous(limits = c(0, 1))
+
+# 利害対立状況での選択率プロット
+ggplot(conflict_rates, aes(x = condition, y = x_rate)) +
+  geom_bar(stat = "identity", fill = "darkred", alpha = 0.7) +
+  geom_errorbar(aes(ymin = x_rate - se, ymax = x_rate + se), width = 0.2) +
+  labs(
+    title = "利害対立状況でのX選択率",
+    x = "条件",
+    y = "X選択率"
+  ) +
+  theme_minimal() +
+  scale_y_continuous(limits = c(0, 1))
+```
+
+# 結果のまとめ
+
+```{r summary-stats}
+# 検定結果のまとめ
+test_summary <- tibble(
+  比較 = c("全体", "利害対立状況"),
+  t値 = c(choice_test$statistic, conflict_test$statistic),
+  p値 = c(choice_test$p.value, conflict_test$p.value),
+  自由度 = c(choice_test$parameter, conflict_test$parameter)
+)
+
+print("【検定結果のまとめ】")
+print(test_summary)
+
+kable(test_summary, 
+      caption = "条件間差の検定結果",
+      digits = 3) %>%
+  kable_styling()
+
+# 記述統計量のまとめ
+descriptive_summary <- df %>%
+  group_by(condition) %>%
+  summarise(
+    n = n(),
+    mean_x = mean(choice_x),
+    sd_x = sd(choice_x),
+    median_x = median(choice_x),
+    q25_x = quantile(choice_x, 0.25),
+    q75_x = quantile(choice_x, 0.75)
+  )
+
+print("\n【記述統計量のまとめ】")
+print(descriptive_summary)
+```
+
+# 補足分析：時系列での選択率変化
+
+```{r time-series}
+# ラウンドごとの選択率の推移
+round_rates <- df %>%
+  group_by(condition, subsession.round_number) %>%
+  summarise(
+    x_rate = mean(choice_x),
+    se = sqrt(x_rate * (1 - x_rate) / n()),
+    .groups = "drop"
+  )
+
+# 時系列プロット
+ggplot(round_rates, aes(x = subsession.round_number, y = x_rate, color = condition)) +
+  geom_line() +
+  geom_ribbon(aes(ymin = x_rate - se, ymax = x_rate + se, fill = condition), alpha = 0.2) +
+  labs(
+    title = "ラウンドごとのX選択率の推移",
+    x = "ラウンド",
+    y = "X選択率",
+    color = "条件",
+    fill = "条件"
+  ) +
+  theme_minimal() +
+  scale_y_continuous(limits = c(0, 1))
+``` 
