@@ -1,0 +1,113 @@
+---
+title: "AI2025_Hinokentei"
+author: "Taito Hirano"
+date: "2025-01-24"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r load_data}
+# 必要なライブラリの読み込み
+library(tidyverse)
+
+# AI条件のデータ
+data_0117_3 <- read_csv("AI2025_data/20250117_3/dictator_app_2025-01-17.csv")
+data_0120_5 <- read_csv("AI2025_data/20250120_5/dictator_app_2025-01-20.csv")
+# コントロール条件のデータ
+data_0117_4 <- read_csv("AI2025_data/20250117_4/Base_dictator_app_2025-01-17.csv")
+data_0120_4 <- read_csv("AI2025_data/20250120_4/Base_dictator_app_2025-01-20.csv")
+```
+
+```{r clean_data}
+# 実際に参加した参加者のデータのみを抽出
+data_0117_3_clean <- data_0117_3 %>%
+  filter(participant.visited == 1)
+
+data_0120_5_clean <- data_0120_5 %>%
+  filter(participant.visited == 1)
+
+# ベースライン条件ではラウンド16を除外
+data_0117_4_clean <- data_0117_4 %>%
+  filter(participant.visited == 1) %>%
+  filter(subsession.round_number != 16)
+
+data_0120_4_clean <- data_0120_4 %>%
+  filter(participant.visited == 1) %>%
+  filter(subsession.round_number != 16)
+```
+
+```{r extract_and_combine}
+# player.choice列を抽出
+choices_0117_3 <- data_0117_3_clean %>%
+  select(player.choice)
+
+choices_0120_5 <- data_0120_5_clean %>%
+  select(player.choice)
+
+choices_0117_4 <- data_0117_4_clean %>%
+  select(player.choice)
+
+choices_0120_4 <- data_0120_4_clean %>%
+  select(player.choice)
+
+# データの統合
+combined_choices_ai <- bind_rows(
+  mutate(choices_0117_3, source = "2025-01-17"),
+  mutate(choices_0120_5, source = "2025-01-20")
+)
+
+combined_choices_base <- bind_rows(
+  mutate(choices_0117_4, source = "2025-01-17"),
+  mutate(choices_0120_4, source = "2025-01-20")
+)
+```
+
+```{r count_choices_ai}
+# AI条件の全体の数とYの数を集計
+total_count <- nrow(combined_choices_ai)
+y_count <- combined_choices_ai %>%
+  filter(player.choice == "Y") %>%
+  nrow()
+
+# 結果の出力
+cat("AI条件の全体の選択数:", total_count, "\n")
+cat("AI条件のYの選択数:", y_count, "\n")
+```
+
+```{r count_choices_base}
+# コントロール条件の全体の数とYの数を集計
+total_count <- nrow(combined_choices_base)
+y_count <- combined_choices_base %>%
+  filter(player.choice == "Y") %>%
+  nrow()
+
+# 結果の出力
+cat("コントロール条件の全体の選択数:", total_count, "\n")
+cat("コントロール条件のYの選択数:", y_count, "\n")
+```
+
+```{r proportion_test}
+# AI条件とコントロール条件のYの選択数とサンプルサイズをまとめる
+ai_y <- combined_choices_ai %>% filter(player.choice == "Y") %>% nrow()
+ai_total <- nrow(combined_choices_ai)
+base_y <- combined_choices_base %>% filter(player.choice == "Y") %>% nrow()
+base_total <- nrow(combined_choices_base)
+
+# 2x2のコンティンジェンシー表を作成
+contingency_table <- matrix(c(
+  ai_y, ai_total - ai_y,
+  base_y, base_total - base_y
+), nrow = 2)
+
+# カイ二乗検定の実行
+chi_square_test <- chisq.test(contingency_table)
+
+# 結果の出力
+cat("AI条件のY選択比率:", round(ai_y/ai_total * 100, 2), "%\n")
+cat("コントロール条件のY選択比率:", round(base_y/base_total * 100, 2), "%\n")
+cat("\nカイ二乗検定の結果:\n")
+print(chi_square_test)
+```

@@ -1,0 +1,37 @@
+Game,Option X (Selfish),Option Y (Altruistic),Category 1 (Slope),Category 2 (Dictator's Position),Category 3 (Highest Efficiency),Category 4 (Lowest Inequality)
+1*,"(890, 140)","(850, 520)",Selfish,Advantageous,Y,Y
+2*,"(910, 140)","(830, 520)",Selfish,Advantageous,Y,Y
+3*,"(940, 150)","(800, 510)",Selfish,Advantageous,Y,Y
+4*,"(980, 170)","(760, 490)",Selfish,Advantageous,Y,Y
+5*,"(1010, 190)","(730, 470)",Selfish,Advantageous,None,Y
+6*,"(1050, 270)","(690, 390)",Selfish,Advantageous,X,Y
+7,"(1060, 330)","(680, 330)",Receiver indiff.,Advantageous,X,Y
+8,"(990, 480)","(750, 180)",X Pareto,Advantageous,X,X
+9,"(930, 510)","(810, 150)",X Pareto,Advantageous,X,X
+10,"(870, 140)","(870, 520)",Dictator indiff.,Advantageous,Y,Y
+11*,"(620, 410)","(580, 790)",Selfish,Mixed,Y,None
+12*,"(640, 410)","(560, 790)",Selfish,Mixed,Y,None
+13*,"(670, 420)","(530, 780)",Selfish,Mixed,Y,None
+14*,"(710, 440)","(490, 760)",Selfish,Mixed,Y,None
+15*,"(740, 460)","(460, 740)",Selfish,Mixed,None,None
+16*,"(780, 540)","(420, 660)",Selfish,Mixed,X,None
+17,"(790, 600)","(410, 600)",Receiver indiff.,Mixed,X,None
+18,"(720, 750)","(480, 450)",X Pareto-dom.,Mixed,X,None
+19,"(660, 780)","(540, 420)",X Pareto-dom.,Mixed,X,None
+20,"(600, 410)","(600, 790)",Dictator indiff.,Mixed,Y,None
+21*,"(350, 680)","(310, 1060)",Selfish,Disadvantageous,Y,X
+22*,"(370, 680)","(290, 1060)",Selfish,Disadvantageous,Y,X
+23*,"(400, 690)","(260, 1050)",Selfish,Disadvantageous,Y,X
+24*,"(440, 710)","(220, 1030)",Selfish,Disadvantageous,Y,X
+25*,"(470, 730)","(190, 1010)",Selfish,Disadvantageous,None,X
+26*,"(510, 810)","(150, 930)",Selfish,Disadvantageous,X,X
+27,"(520, 870)","(140, 870)",Receiver indiff.,Disadvantageous,X,X
+28,"(450, 1020)","(210, 720)",X Pareto-dom.,Disadvantageous,X,Y
+29,"(390, 1050)","(270, 690)",X Pareto-dom.,Disadvantageous,X,Y
+30,"(330, 680)","(330, 1060)",Dictator indiff.,Disadvantageous,Y,X
+1,"(1030, 220)","(710, 440)",Selfish,Advantageous,X,Y
+2,"(960, 500)","(780, 160)",X Pareto,Advantageous,X,X
+3,"(760, 490)","(440, 710)",Selfish,Mixed,X,None
+4,"(690, 770)","(510, 430)",X Pareto,Mixed,X,None
+5,"(490, 760)","(170, 980)",Selfish,Disadvantageous,X,X
+6,"(420, 1040)","(240, 700)",X Pareto,Disadvantageous,X,Y
