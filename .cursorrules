@@ -10,10 +10,10 @@
 # データの読み込みと前処理
 
 ```r
-# AI条件のデータ
+# AI条件の独裁者ゲームデータ
 data_0117_3 <- read_csv("AI2025_data/20250117_3/dictator_app_2025-01-17.csv")
 data_0120_5 <- read_csv("AI2025_data/20250120_5/dictator_app_2025-01-20.csv")
-# コントロール条件のデータ
+# コントロール条件の独裁者ゲームデータ
 data_0117_4 <- read_csv("AI2025_data/20250117_4/Base_dictator_app_2025-01-17.csv")
 data_0120_4 <- read_csv("AI2025_data/20250120_4/Base_dictator_app_2025-01-20.csv")
 
@@ -33,6 +33,10 @@ data_0117_4_clean <- data_0117_4 %>%
 data_0120_4_clean <- data_0120_4 %>%
   filter(participant.visited == 1) %>%
   filter(subsession.round_number != 16)
+
+適時、必要なデータを以下のディレクトリから読み込んでください。
+
+
 ```
 
 ---
