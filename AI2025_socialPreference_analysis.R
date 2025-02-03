@@ -96,23 +96,32 @@ print("最初の5行の効用値:")
 print(test_results)
 
 # 効用関数の定義
-utility <- function(payoff_self, payoff_other, alpha, beta) {
+utility <- function(payoff_self, payoff_other, alpha, beta, lambda) {
   s <- as.numeric(payoff_other > payoff_self)
   r <- as.numeric(payoff_self > payoff_other)
-  (1 - alpha * s - beta * r) * payoff_self + (alpha * s + beta * r) * payoff_other
+  
+  # 基本的な効用
+  u <- (1 - alpha * s - beta * r) * payoff_self + (alpha * s + beta * r) * payoff_other
+  
+  # 選択の一貫性を考慮
+  return(lambda * u)
 }
 
 # 対数尤度関数
 log_likelihood <- function(params, data) {
   alpha <- params[1]
   beta <- params[2]
+  lambda <- exp(params[3])  # 常に正の値を保証
   
-  # パラメータの制約チェック
-  if(alpha < 0 || alpha > 1 || beta < 0 || beta > 1) return(-Inf)
+  # パラメータの制約を緩和（ペナルティアプローチ）
+  penalty <- 0
+  if(abs(alpha) > 2) penalty <- penalty + (abs(alpha) - 2)^2
+  if(abs(beta) > 2) penalty <- penalty + (abs(beta) - 2)^2
+  if(lambda > 10) penalty <- penalty + (lambda - 10)^2
   
   # 効用の計算
   utilities <- mapply(
-    function(ps, po) utility(ps, po, alpha, beta),
+    function(ps, po) utility(ps, po, alpha, beta, lambda),
     data$player.payoff_dictator,
     data$player.payoff_receiver
   )
@@ -130,6 +139,9 @@ log_likelihood <- function(params, data) {
   # 対数尤度の計算
   ll <- sum(data$choice_numeric * log(probs) + (1 - data$choice_numeric) * log(1 - probs))
   
+  # ペナルティの適用
+  ll <- ll - 0.1 * penalty
+  
   # NaNチェック
   if (is.nan(ll) || is.infinite(ll)) {
     warning("無効な対数尤度値が検出されました")
@@ -141,53 +153,63 @@ log_likelihood <- function(params, data) {
 
 # 対数尤度関数のテスト
 print("\n=== 対数尤度関数のテスト ===")
-test_ll <- log_likelihood(c(0.3, 0.2), head(ai_processed, 5))
+test_ll <- log_likelihood(c(0.3, 0.2, log(1)), head(ai_processed, 5))
 print("最初の5行での対数尤度値:")
 print(test_ll)
 
 # パラメータ推定関数
 estimate_parameters <- function(data) {
-  # 初期値の設定
-  start_values <- c(alpha = 0.3, beta = 0.2)
+  # 初期値のグリッド
+  alphas <- seq(-0.5, 1.0, by = 0.25)
+  betas <- seq(-0.5, 1.0, by = 0.25)
+  lambdas <- seq(-1, 1, by = 0.5)  # log(lambda)の値
   
-  # 最適化の制約
-  lower <- c(0, 0)  # 下限
-  upper <- c(1, 1)  # 上限
+  start_values <- expand.grid(
+    alpha = alphas,
+    beta = betas,
+    lambda = lambdas
+  )
   
-  tryCatch({
-    result <- maxLik(
-      logLik = log_likelihood,
-      start = start_values,
-      method = "BFGS",
-      data = data,
-      control = list(
-        printLevel = 2,  # より詳細な出力
-        tol = 1e-8,     # 収束判定の閾値
-        reltol = 1e-8   # 相対的な収束判定の閾値
-      ),
-      constraints = list(
-        ineqA = rbind(diag(2), -diag(2)),
-        ineqB = c(upper, -lower)
+  # 最適化の設定
+  control_settings <- list(
+    tol = 1e-8,
+    reltol = 1e-8,
+    iterlim = 5000,
+    printLevel = 2
+  )
+  
+  # 各初期値での推定結果を保存
+  results <- list()
+  best_ll <- -Inf
+  best_result <- NULL
+  
+  for(i in 1:nrow(start_values)) {
+    tryCatch({
+      result <- maxLik(
+        logLik = log_likelihood,
+        start = as.numeric(start_values[i,]),
+        method = "BFGS",
+        control = control_settings,
+        data = data
       )
-    )
-    
-    # 収束チェック
-    if (!result$convergence) {
-      warning("最適化が収束しませんでした")
-      return(NULL)
-    }
-    
-    # ヘッセ行列のチェック
-    if (any(is.infinite(sqrt(diag(vcov(result)))))) {
-      warning("無限大の標準誤差が検出されました")
-      return(NULL)
-    }
-    
-    return(result)
-  }, error = function(e) {
-    warning(paste("推定エラー:", e$message))
+      
+      if(result$maximum > best_ll && !any(is.na(sqrt(diag(vcov(result)))))) {
+        best_ll <- result$maximum
+        best_result <- result
+      }
+      
+      results[[i]] <- result
+    }, error = function(e) {
+      warning(paste("初期値", i, "での推定エラー:", e$message))
+    })
+  }
+  
+  if(is.null(best_result)) {
+    warning("すべての初期値で推定に失敗しました")
     return(NULL)
-  })
+  }
+  
+  return(best_result)
 }
 
 # 4. パラメータ推定の実行 ----
@@ -368,4 +390,288 @@ write.csv(ci_results, "confidence_intervals.csv")
 if (exists("elasticity_table")) {
   write.csv(elasticity_table, "elasticity_results.csv", row.names = FALSE)
 }
-write.csv(diagnostic_results, "diagnostic_results.csv", row.names = FALSE) 
+write.csv(diagnostic_results, "diagnostic_results.csv", row.names = FALSE)
+
+# 結果の可視化と統計的検定
+visualize_and_test_results <- function(ai_estimates, control_estimates) {
+  # パラメータの信頼区間の計算
+  get_ci <- function(estimates) {
+    coef <- coef(estimates)
+    se <- sqrt(diag(vcov(estimates)))
+    data.frame(
+      parameter = c("α", "β", "λ"),
+      estimate = c(coef[1:2], exp(coef[3])),
+      lower = c(coef[1:2], exp(coef[3])) - 1.96 * se,
+      upper = c(coef[1:2], exp(coef[3])) + 1.96 * se
+    )
+  }
+  
+  ai_ci <- get_ci(ai_estimates)
+  control_ci <- get_ci(control_estimates)
+  
+  # パラメータの比較プロット
+  parameter_plot <- ggplot() +
+    geom_pointrange(data = ai_ci,
+                   aes(x = parameter, y = estimate, 
+                       ymin = lower, ymax = upper, color = "AI")) +
+    geom_pointrange(data = control_ci,
+                   aes(x = parameter, y = estimate, 
+                       ymin = lower, ymax = upper, color = "Control")) +
+    labs(title = "社会的選好パラメータの推定結果",
+         x = "パラメータ",
+         y = "推定値",
+         color = "条件") +
+    theme_minimal() +
+    theme(text = element_text(family = "HiraKakuProN-W3"))
+  
+  # プロットの保存
+  ggsave("social_preference_parameters.png", parameter_plot, 
+         width = 10, height = 6)
+  
+  # 統計的検定
+  # パラメータの差のZ検定
+  z_test <- function(est1, se1, est2, se2) {
+    z_stat <- (est1 - est2) / sqrt(se1^2 + se2^2)
+    p_value <- 2 * (1 - pnorm(abs(z_stat)))
+    return(c(z_stat = z_stat, p_value = p_value))
+  }
+  
+  # 各パラメータの差の検定
+  ai_coef <- coef(ai_estimates)
+  ai_se <- sqrt(diag(vcov(ai_estimates)))
+  control_coef <- coef(control_estimates)
+  control_se <- sqrt(diag(vcov(control_estimates)))
+  
+  test_results <- data.frame(
+    parameter = c("α", "β", "λ"),
+    z_statistic = numeric(3),
+    p_value = numeric(3)
+  )
+  
+  for(i in 1:3) {
+    test <- z_test(ai_coef[i], ai_se[i], control_coef[i], control_se[i])
+    test_results$z_statistic[i] <- test["z_stat"]
+    test_results$p_value[i] <- test["p_value"]
+  }
+  
+  # 結果の出力
+  cat("\n=== 社会的選好パラメータの推定結果 ===\n")
+  cat("\nAI条件:\n")
+  print(ai_ci)
+  cat("\nControl条件:\n")
+  print(control_ci)
+  cat("\n条件間の差の検定結果:\n")
+  print(test_results)
+  
+  # 結果の保存
+  results_list <- list(
+    ai_estimates = ai_ci,
+    control_estimates = control_ci,
+    difference_tests = test_results,
+    plot = parameter_plot
+  )
+  
+  saveRDS(results_list, "social_preference_analysis_results.rds")
+  write.csv(test_results, "parameter_difference_tests.csv", row.names = FALSE)
+  
+  return(results_list)
+}
+
+# 結果の分析実行
+analysis_results <- visualize_and_test_results(ai_estimates, control_estimates)
+
+# パターンの解釈
+interpret_results <- function(analysis_results) {
+  ai_params <- analysis_results$ai_estimates
+  control_params <- analysis_results$control_estimates
+  tests <- analysis_results$difference_tests
+  
+  cat("\n=== 社会的選好パターンの解釈 ===\n")
+  
+  # α（不利な不平等への感応度）の解釈
+  cat("\n1. 不利な不平等への感応度 (α):\n")
+  alpha_diff <- ai_params$estimate[1] - control_params$estimate[1]
+  cat(sprintf("  - AI条件: %.3f (95%% CI: %.3f-%.3f)\n",
+              ai_params$estimate[1], ai_params$lower[1], ai_params$upper[1]))
+  cat(sprintf("  - Control条件: %.3f (95%% CI: %.3f-%.3f)\n",
+              control_params$estimate[1], control_params$lower[1], control_params$upper[1]))
+  cat(sprintf("  - 差: %.3f (p = %.3f)\n", alpha_diff, tests$p_value[1]))
+  
+  # β（有利な不平等への感応度）の解釈
+  cat("\n2. 有利な不平等への感応度 (β):\n")
+  beta_diff <- ai_params$estimate[2] - control_params$estimate[2]
+  cat(sprintf("  - AI条件: %.3f (95%% CI: %.3f-%.3f)\n",
+              ai_params$estimate[2], ai_params$lower[2], ai_params$upper[2]))
+  cat(sprintf("  - Control条件: %.3f (95%% CI: %.3f-%.3f)\n",
+              control_params$estimate[2], control_params$lower[2], control_params$upper[2]))
+  cat(sprintf("  - 差: %.3f (p = %.3f)\n", beta_diff, tests$p_value[2]))
+  
+  # λ（選択の一貫性）の解釈
+  cat("\n3. 選択の一貫性 (λ):\n")
+  lambda_diff <- ai_params$estimate[3] - control_params$estimate[3]
+  cat(sprintf("  - AI条件: %.3f (95%% CI: %.3f-%.3f)\n",
+              ai_params$estimate[3], ai_params$lower[3], ai_params$upper[3]))
+  cat(sprintf("  - Control条件: %.3f (95%% CI: %.3f-%.3f)\n",
+              control_params$estimate[3], control_params$lower[3], control_params$upper[3]))
+  cat(sprintf("  - 差: %.3f (p = %.3f)\n", lambda_diff, tests$p_value[3]))
+  
+  # 全体的なパターンの解釈
+  cat("\n4. 全体的なパターン:\n")
+  pattern <- case_when(
+    alpha_diff > 0 & beta_diff > 0 ~ "普遍的利他性の増加",
+    alpha_diff > 0 & abs(beta_diff) < 0.1 ~ "弱者保護指向の強化",
+    abs(alpha_diff) < 0.1 & beta_diff > 0 ~ "効率性重視の傾向",
+    alpha_diff < 0 & beta_diff < 0 ~ "自己利益最大化の傾向",
+    TRUE ~ "混合パターン"
+  )
+  cat(sprintf("  - 観察されたパターン: %s\n", pattern))
+  
+  # 結果の保存
+  interpretation <- list(
+    pattern = pattern,
+    alpha_difference = alpha_diff,
+    beta_difference = beta_diff,
+    lambda_difference = lambda_diff,
+    p_values = tests$p_value
+  )
+  
+  saveRDS(interpretation, "social_preference_interpretation.rds")
+  
+  return(interpretation)
+}
+
+# 結果の解釈実行
+interpretation <- interpret_results(analysis_results)
+
+# 結果の出力を改善
+print_results <- function(ai_estimates, control_estimates) {
+  cat("\n=== 社会的選好パラメータの推定結果 ===\n")
+  
+  # AI条件の結果
+  cat("\nAI条件の推定結果:\n")
+  ai_coef <- coef(ai_estimates)
+  ai_se <- sqrt(diag(vcov(ai_estimates)))
+  print(data.frame(
+    Parameter = c("α", "β", "λ"),
+    Estimate = ai_coef,
+    Std_Error = ai_se
+  ))
+  
+  # Control条件の結果
+  cat("\nControl条件の推定結果:\n")
+  control_coef <- coef(control_estimates)
+  control_se <- sqrt(diag(vcov(control_estimates)))
+  print(data.frame(
+    Parameter = c("α", "β", "λ"),
+    Estimate = control_coef,
+    Std_Error = control_se
+  ))
+  
+  # 結果をファイルに保存
+  results_df <- rbind(
+    data.frame(
+      Condition = "AI",
+      Parameter = c("α", "β", "λ"),
+      Estimate = ai_coef,
+      Std_Error = ai_se
+    ),
+    data.frame(
+      Condition = "Control",
+      Parameter = c("α", "β", "λ"),
+      Estimate = control_coef,
+      Std_Error = control_se
+    )
+  )
+  
+  # CSVファイルとして保存
+  write.csv(results_df, "social_preference_parameters.csv", row.names = FALSE)
+  
+  # パラメータの差の検定
+  z_stats <- (ai_coef - control_coef) / 
+    sqrt(ai_se^2 + control_se^2)
+  p_values <- 2 * (1 - pnorm(abs(z_stats)))
+  
+  difference_tests <- data.frame(
+    Parameter = c("α", "β", "λ"),
+    Difference = ai_coef - control_coef,
+    Z_statistic = z_stats,
+    P_value = p_values
+  )
+  
+  cat("\n=== パラメータの差の検定結果 ===\n")
+  print(difference_tests)
+  
+  # 検定結果をCSVファイルとして保存
+  write.csv(difference_tests, "parameter_difference_tests.csv", row.names = FALSE)
+  
+  # 解釈
+  cat("\n=== 結果の解釈 ===\n")
+  
+  # α（不利な不平等への感応度）の解釈
+  cat("\n1. 不利な不平等への感応度 (α):\n")
+  if (p_values[1] < 0.05) {
+    cat(sprintf("  - 有意な差が検出されました (p = %.3f)\n", p_values[1]))
+    if (ai_coef[1] > control_coef[1]) {
+      cat("  - AI条件の方が不利な不平等に対してより敏感です\n")
+    } else {
+      cat("  - Control条件の方が不利な不平等に対してより敏感です\n")
+    }
+  } else {
+    cat("  - 条件間で有意な差は検出されませんでした\n")
+  }
+  
+  # β（有利な不平等への感応度）の解釈
+  cat("\n2. 有利な不平等への感応度 (β):\n")
+  if (p_values[2] < 0.05) {
+    cat(sprintf("  - 有意な差が検出されました (p = %.3f)\n", p_values[2]))
+    if (ai_coef[2] > control_coef[2]) {
+      cat("  - AI条件の方が有利な不平等に対してより敏感です\n")
+    } else {
+      cat("  - Control条件の方が有利な不平等に対してより敏感です\n")
+    }
+  } else {
+    cat("  - 条件間で有意な差は検出されませんでした\n")
+  }
+  
+  # λ（選択の一貫性）の解釈
+  cat("\n3. 選択の一貫性 (λ):\n")
+  if (p_values[3] < 0.05) {
+    cat(sprintf("  - 有意な差が検出されました (p = %.3f)\n", p_values[3]))
+    if (ai_coef[3] > control_coef[3]) {
+      cat("  - AI条件の方が選択がより一貫しています\n")
+    } else {
+      cat("  - Control条件の方が選択がより一貫しています\n")
+    }
+  } else {
+    cat("  - 条件間で有意な差は検出されませんでした\n")
+  }
+  
+  # 全体的なパターンの解釈
+  cat("\n4. 全体的なパターン:\n")
+  alpha_diff <- ai_coef[1] - control_coef[1]
+  beta_diff <- ai_coef[2] - control_coef[2]
+  
+  pattern <- case_when(
+    alpha_diff > 0 & beta_diff > 0 ~ "普遍的利他性の増加",
+    alpha_diff > 0 & abs(beta_diff) < 0.1 ~ "弱者保護指向の強化",
+    abs(alpha_diff) < 0.1 & beta_diff > 0 ~ "効率性重視の傾向",
+    alpha_diff < 0 & beta_diff < 0 ~ "自己利益最大化の傾向",
+    TRUE ~ "混合パターン"
+  )
+  
+  cat(sprintf("  観察されたパターン: %s\n", pattern))
+  
+  # 結果をRDSファイルとして保存
+  results_list <- list(
+    parameters = results_df,
+    difference_tests = difference_tests,
+    pattern = pattern
+  )
+  
+  saveRDS(results_list, "social_preference_results.rds")
+  
+  invisible(results_list)
+}
+
+# 結果の出力を実行
+results <- print_results(ai_estimates, control_estimates) 
