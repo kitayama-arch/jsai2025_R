@@ -9,3 +9,6 @@ Rplots.pdf
 *_files/
 *.rds
 workspace.RData
+
+# windsurf rules
+.windsurfrules

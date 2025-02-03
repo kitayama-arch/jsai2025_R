@@ -37,23 +37,3 @@ AI2025_R/
    - 分配の公平性分析
 
 ## 使用方法
-
-1. リポジトリのクローン:
-```bash
-git clone https://github.com/kitayama-arch/AI2025_R.git
-```
-
-2. 必要なRパッケージのインストール:
-```r
-install.packages(c("tidyverse", "kableExtra", "effectsize", "broom"))
-```
-
-3. 分析の実行:
-```r
-rmarkdown::render("AI2025_choice_analysis.Rmd")
-```
-
-## 注意事項
-
-- データは非公開情報を含むため、適切な取り扱いが必要です
-- 分析結果の公開前に、プライバシーに関する確認が必要です

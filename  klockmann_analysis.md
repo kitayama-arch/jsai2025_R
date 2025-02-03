@@ -1,55 +1,27 @@
-Behavioral predictions 
-To investigate how treatment manipulations influenced how individuals trained the AI algorithm, we developed behav- 
-ioral conjectures based on the comparisons of the dictators’ revealed distributional preferences across treatments. With 
-standard preferences and individuals exclusively motivated by the maximization of their payoffs, we expected no difference 
-across treatments Baseline, Externality, and Offspring. Since the expected payoff of dictators in the Switch and Offspring 
-Switch partially depended on the amount allocated to the receiver, we expected that a fully rational player would choose 
-option Y in some cases (see below for details). 
-To identify the distributional preferences revealed by the dictator’s decisions, we considered the frequency of choosing 
-a certain option and estimated parameters of social preferences. We refer to Bruhin et al. (2019) , who built on Fehr and 
-Schmidt (1999) and Charness and Rabin (2002) , to set up a two-player model of social preferences that was fitted to the 
-data, using maximum likelihood. Denoting the payoffs of the dictator by πD and that of the receiver by πR , the dictator’s 
-utility function is given by 
-u D (πD , πR ) = (1 − αs − βr) πD + (αs + βr) πR . (1) 
-9 Less than 1% of all students registered in the participants pool of the Frankfurt Laboratory for Experimental Economic Research opted out of online 
-experiments. Therefore, there is no reason to fear a selection bias due to the novel format of the experiment. 
-10 We preregistered the project, the sample size, and our hypotheses on AsPredicted (#44011) in July 2020 before starting the data collection. Before, we 
-ran two pilot sessions in June 2020 to check for technical functionality and calibrated the decision space of the dictators. 
-291 
-V. Klockmann, A. von Schenk and M.C. Villeval Journal of Economic Behavior and Organization 203 (2022) 284–317 
-Hereby, s = 1 { πR − πD > 0 } and r = 1 { πD − πR > 0 } are indicators of disadvantageous and advantageous inequality for the 
-dictator, respectively. Following Bruhin et al. (2019) , the sign of the parameters α and β describe the preference type of 
-the dictator. α < 0 reveals “behindness averse” decisions motivated by envy of the receiver’s payoff whenever receiving 
-a lower amount. Similarly, β > 0 reveals “aheadness averse” decisions motivated by a willingness to increase the other’s 
-payoff whenever receiving a larger amount. 11 Depending on the absolute value of α and β, the choices reveal more envious 
-or more empathetic preferences. Furthermore, the parameters may have the same sign. First, if α, β < 0 , choices are spiteful, 
-independent of whether the receiver earns more or less than the dictator. In this case, the dictator always wants to maximize 
-her outcome relative to the receiver’s payoff, while simultaneously directly caring for the own payment. Second, if α = β = 
-0 , choices are purely selfish and the dictator does not put any weight on the other’s payoff. Finally, if α, β > 0 , choices are 
-altruistic because the dictator always derives utility from the receiver receiving a payoff. Here, the dictator shows social- 
-welfare preferences and efficiency concerns as she seeks to increase the payoff of her own and of the receiver. 
-When estimating the social preference parameters of a dictator representative for the behavior observed in the respective 
-treatment, we closely adhered to above described method by Bruhin et al. (2019) for the following reasons. First, though 
-dictators in the Offspring treatment can benefit repeatedly from selfish training of the algorithm, we need not incorporate 
-this in the utility functions. The estimated parameters α and β only describe the relative weighting of payoffs rather than 
-absolute weights. The additional future payoff in the Offspring treatment proportionately increases stakes for both dictator 
-and receiver and does not affect our parameter estimation. 12 Second, we did not explicitly model the externality of training 
-data on the future that dictators create in the Externality, Offspring, and Offspring Switch treatments and thus, did not 
-directly incorporate the payoffs of the future pair(s) in the utility functions. If we just added these future payoffs of the 
-other dictator and receiver, we would implicitly assume that the dictator assigns equal weights to her own payoff and the 
-payoff of the other (future) dictator, which is most likely not true. Our aim was to measure how changes in the externality 
-of AI training and its consequences affect revealed social preferences as defined in the dictator’s utility function in (1) . 
-Finally, the utility function in (1) can already capture the possibility of switched payoffs between dictator and receiver in 
-the Offspring Switch and Switch treatments. The dictator’s expected payoff in these treatments is a weighted sum of πD and 
-πR rather than only πD . This can directly be represented by positive weights α and β beyond any social preferences. We 
-refer to this in more detail in what follows. 
-We then formulated behavioral conjectures regarding the dictators’ choices and the differences in the parameters cap- 
-turing social preferences across treatments. In the first set of treatments (Baseline, Externality, and Offspring), the experi- 
-mental design manipulated the relationship between dictators and another pair of participants in a future generation, and 
-highlighted the transfer of data and choice preferences via the AI’s training. 
-We first tested whether an externality of today’s behavior on future predictions and payoffs through the AI affected 
-today’s decisions, by comparing the Baseline and the Externality treatment. The salience of such an externality could influ- 
-ence its internalization by the dictators. For example, if an individual was inequity averse, she might be even more willing 
-to reduce inequality in a future group that would be affected by her training of the algorithm. We thus conjectured that 
-the information on an externality of AI training for the future, if anything, would make selfish choices that increase the 
-dictator’s payoff at the expense of the receiver’s payoff less likely.
+Behavioral predictions
+
+To investigate how treatment manipulations influenced how individuals trained the AI algorithm, we developed behavioral conjectures based on the comparisons of the dictators' revealed distributional preferences across treatments. With standard preferences and individuals exclusively motivated by the maximization of their payoffs, we expected no difference across treatments Baseline, Externality, and Offspring. Since the expected payoff of dictators in the Switch and Offspring Switch partially depended on the amount allocated to the receiver, we expected that a fully rational player would choose option Y in some cases (see below for details).
+
+To identify the distributional preferences revealed by the dictator's decisions, we considered the frequency of choosing a certain option and estimated parameters of social preferences. We refer to Bruhin et al. (2019), who built on Fehr and Schmidt (1999) and Charness and Rabin (2002), to set up a two-player model of social preferences that was fitted to the data, using maximum likelihood. Denoting the payoffs of the dictator by πD and that of the receiver by πR, the dictator's utility function is given by:
+
+u D (πD, πR) = (1 - αs - βr) πD + (αs + βr) πR                                                                           (1)
+
+Hereby, s = 1{πR - πD > 0} and r = 1{πD - πR > 0} are indicators of disadvantageous and advantageous inequality for the dictator, respectively. Following Bruhin et al. (2019), the sign of the parameters α and β describe the preference type of the dictator. α < 0 reveals "behindness averse" decisions motivated by envy of the receiver's payoff whenever receiving a lower amount. Similarly, β > 0 reveals "aheadness averse" decisions motivated by a willingness to increase the other's payoff whenever receiving a larger amount.
+
+Depending on the absolute value of α and β, the choices reveal more envious or more empathetic preferences. Furthermore, the parameters may have the same sign:
+
+- If α, β < 0, choices are spiteful, independent of whether the receiver earns more or less than the dictator. In this case, the dictator always wants to maximize her outcome relative to the receiver's payoff, while simultaneously directly caring for the own payment.
+- If α = β = 0, choices are purely selfish and the dictator does not put any weight on the other's payoff.
+- Finally, if α, β > 0, choices are altruistic because the dictator always derives utility from the receiver receiving a payoff. Here, the dictator shows social-welfare preferences and efficiency concerns as she seeks to increase the payoff of her own and of the receiver.
+
+When estimating the social preference parameters of a dictator representative for the behavior observed in the respective treatment, we closely adhered to above described method by Bruhin et al. (2019) for the following reasons:
+
+1. Though dictators in the Offspring treatment can benefit repeatedly from selfish training of the algorithm, we need not incorporate this in the utility functions. The estimated parameters α and β only describe the relative weighting of payoffs rather than absolute weights. The additional future payoff in the Offspring treatment proportionately increases stakes for both dictator and receiver and does not affect our parameter estimation.
+
+2. We did not explicitly model the externality of training data on the future that dictators create in the Externality, Offspring, and Offspring Switch treatments and thus, did not directly incorporate the payoffs of the future pair(s) in the utility functions. If we just added these future payoffs of the other dictator and receiver, we would implicitly assume that the dictator assigns equal weights to her own payoff and the payoff of the other (future) dictator, which is most likely not true.
+
+3. Our aim was to measure how changes in the externality of AI training and its consequences affect revealed social preferences as defined in the dictator's utility function in (1). Finally, the utility function in (1) can already capture the possibility of switched payoffs between dictator and receiver in the Offspring Switch and Switch treatments. The dictator's expected payoff in these treatments is a weighted sum of πD and πR rather than only πD. This can directly be represented by positive weights α and β beyond any social preferences.
+
+We then formulated behavioral conjectures regarding the dictators' choices and the differences in the parameters capturing social preferences across treatments. In the first set of treatments (Baseline, Externality, and Offspring), the experimental design manipulated the relationship between dictators and another pair of participants in a future generation, and highlighted the transfer of data and choice preferences via the AI's training.
+
+We first tested whether an externality of today's behavior on future predictions and payoffs through the AI affected today's decisions, by comparing the Baseline and the Externality treatment. The salience of such an externality could influence its internalization by the dictators. For example, if an individual was inequity averse, she might be even more willing to reduce inequality in a future group that would be affected by her training of the algorithm. We thus conjectured that the information on an externality of AI training for the future, if anything, would make selfish choices that increase the dictator's payoff at the expense of the receiver's payoff less likely.

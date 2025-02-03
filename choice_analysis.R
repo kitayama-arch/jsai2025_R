@@ -166,13 +166,14 @@ print("\n【利他的選択のt検定結果】")
 print(altruism_test)
 
 # 効果量計算
-altruism_effect <- cohens_d(
-  is_altruistic ~ condition,
-  data = df
+altruism_d <- cohens_d(
+  as.numeric(is_altruistic) ~ condition,
+  data = df,
+  pooled_sd = TRUE
 )
 
 print("\n【利他的選択の効果量】")
-print(altruism_effect)
+print(altruism_d)
 
 # 混合効果モデル
 altruism_model <- glmer(
@@ -362,9 +363,9 @@ result_text <- sprintf("
   altruism_test$p.value,
   altruism_test$conf.int[1],
   altruism_test$conf.int[2],
-  altruism_effect$Cohens_d,
-  altruism_effect$CI_low,
-  altruism_effect$CI_high
+  altruism_d$Cohens_d,
+  altruism_d$CI_low,
+  altruism_d$CI_high
 )
 
 cat(result_text)
