@@ -20,6 +20,9 @@ handle_data_loading <- function(file_path) {
 }
 
 # データの読み込み
+# 選択肢データの読み込み
+payoff_scenarios <- handle_data_loading("Experiment/payoff_scenarios_analysis.csv")
+
 # AI条件の独裁者ゲームデータ
 data_0117_3 <- handle_data_loading("AI2025_data/20250117_3/dictator_app_2025-01-17.csv")
 data_0120_5 <- handle_data_loading("AI2025_data/20250120_5/dictator_app_2025-01-20.csv")
@@ -40,6 +43,30 @@ clean_dictator_data <- function(data, is_control = FALSE) {
     cleaned_data <- cleaned_data %>%
       filter(subsession.round_number != 16)
   }
+  
+  # 選択しなかった方の選択肢データを追加
+  cleaned_data <- cleaned_data %>%
+    left_join(
+      payoff_scenarios %>% 
+        filter(Is_Training == TRUE) %>%
+        select(
+          Game,
+          Option_X_Dictator, Option_X_Receiver,
+          Option_Y_Dictator, Option_Y_Receiver
+        ),
+      by = c("subsession.round_number" = "Game")
+    ) %>%
+    mutate(
+      # 選択しなかった方の選択肢のデータを設定
+      non_chosen_payoff_dictator = case_when(
+        player.choice == "X" ~ Option_Y_Dictator,
+        player.choice == "Y" ~ Option_X_Dictator
+      ),
+      non_chosen_payoff_receiver = case_when(
+        player.choice == "X" ~ Option_Y_Receiver,
+        player.choice == "Y" ~ Option_X_Receiver
+      )
+    )
   
   # データの妥当性チェック
   if (nrow(cleaned_data) == 0) {
@@ -110,26 +137,22 @@ likelihood_function <- function(params, data) {
   # 効用関数の計算（Bruhin et al. 2019の定式化に基づく）
   utility_X <- with(data, {
     # 不平等指標の計算
-    s <- as.integer(player.payoff_receiver > player.payoff_dictator)
-    r <- as.integer(player.payoff_dictator > player.payoff_receiver)
+    s <- as.integer(Option_X_Receiver > Option_X_Dictator)
+    r <- as.integer(Option_X_Dictator > Option_X_Receiver)
     
     # 効用関数: u_D(π_D, π_R) = (1 - αs - βr)π_D + (αs + βr)π_R
-    (1 - alpha * s - beta * r) * player.payoff_dictator / 1000 + 
-    (alpha * s + beta * r) * player.payoff_receiver / 1000
+    (1 - alpha * s - beta * r) * Option_X_Dictator / 1000 + 
+    (alpha * s + beta * r) * Option_X_Receiver / 1000
   })
 
   utility_Y <- with(data, {
-    # 選択Yの場合の利得
-    payoff_dictator_Y <- 1000 - player.payoff_dictator
-    payoff_receiver_Y <- 1000 - player.payoff_receiver
-    
     # 不平等指標の計算（選択Yの場合）
-    s <- as.integer(payoff_receiver_Y > payoff_dictator_Y)
-    r <- as.integer(payoff_dictator_Y > payoff_receiver_Y)
+    s <- as.integer(Option_Y_Receiver > Option_Y_Dictator)
+    r <- as.integer(Option_Y_Dictator > Option_Y_Receiver)
     
     # 効用関数: u_D(π_D, π_R) = (1 - αs - βr)π_D + (αs + βr)π_R
-    (1 - alpha * s - beta * r) * payoff_dictator_Y / 1000 + 
-    (alpha * s + beta * r) * payoff_receiver_Y / 1000
+    (1 - alpha * s - beta * r) * Option_Y_Dictator / 1000 + 
+    (alpha * s + beta * r) * Option_Y_Receiver / 1000
   })
   
   # 効用差の計算
@@ -202,7 +225,7 @@ estimate_social_preferences <- function(data) {
   
   # 複数の最適化アルゴリズムを試す
   methods <- c("L-BFGS-B", "Nelder-Mead", "BFGS")
-  １all_results <- list()
+  all_results <- list()
   
   for (method in methods) {
     for (i in 1:nrow(best_starts)) {
@@ -435,16 +458,65 @@ save_analysis_results <- function(results, test_results, file_path = "analysis/s
   
   cat("# 社会的選好パラメータ分析結果\n\n")
   
-  cat("## 1. 記述統計\n\n")
+  cat("## 1. 社会的選好パラメータの推定結果\n\n")
+  cat("### 1.1 条件ごとのパラメータ推定値\n\n")
+  for (cond in unique(results$condition)) {
+    cat(sprintf("\n#### %s条件:\n", cond))
+    cond_data <- results %>% filter(condition == cond)
+    if (!all(is.na(cond_data$alpha))) {
+      cat(sprintf("- α (不利な不平等回避) = %.3f ± %.3f\n", 
+                 cond_data$alpha, cond_data$alpha_se))
+      cat(sprintf("- β (有利な不平等回避) = %.3f ± %.3f\n", 
+                 cond_data$beta, cond_data$beta_se))
+      cat(sprintf("- λ (選択の感度) = %.3f ± %.3f\n", 
+                 cond_data$lambda, cond_data$lambda_se))
+    } else {
+      cat("パラメータの推定に失敗しました\n")
+    }
+  }
+
+  cat("\n### 1.2 条件間の差（AI - Control）\n\n")
+  if (nrow(results) == 2 && !any(is.na(results$alpha))) {
+    ai_data <- results %>% filter(condition == "AI")
+    control_data <- results %>% filter(condition == "Control")
+    
+    # 差の計算
+    delta_alpha <- ai_data$alpha - control_data$alpha
+    delta_beta <- ai_data$beta - control_data$beta
+    delta_lambda <- ai_data$lambda - control_data$lambda
+    
+    # 標準誤差の計算
+    se_diff_alpha <- sqrt(ai_data$alpha_se^2 + control_data$alpha_se^2)
+    se_diff_beta <- sqrt(ai_data$beta_se^2 + control_data$beta_se^2)
+    se_diff_lambda <- sqrt(ai_data$lambda_se^2 + control_data$lambda_se^2)
+    
+    # z値とp値の計算
+    z_alpha <- delta_alpha / se_diff_alpha
+    z_beta <- delta_beta / se_diff_beta
+    z_lambda <- delta_lambda / se_diff_lambda
+    
+    p_alpha <- 2 * (1 - pnorm(abs(z_alpha)))
+    p_beta <- 2 * (1 - pnorm(abs(z_beta)))
+    p_lambda <- 2 * (1 - pnorm(abs(z_lambda)))
+    
+    cat("パラメータの差（AI - Control）:\n")
+    cat(sprintf("- Δα = %.3f ± %.3f (z = %.3f, p = %.3f)\n", 
+               delta_alpha, se_diff_alpha, z_alpha, p_alpha))
+    cat(sprintf("- Δβ = %.3f ± %.3f (z = %.3f, p = %.3f)\n", 
+               delta_beta, se_diff_beta, z_beta, p_beta))
+    cat(sprintf("- Δλ = %.3f ± %.3f (z = %.3f, p = %.3f)\n", 
+               delta_lambda, se_diff_lambda, z_lambda, p_lambda))
+  }
+  
+  cat("\n## 2. 記述統計\n\n")
   print(test_results$summary_stats)
   
-  cat("\n## 2. 統計的検定結果\n\n")
-  cat("### 2.1 選択比率の条件間差（Wilcoxon検定）\n")
+  cat("\n## 3. 統計的検定結果\n\n")
+  cat("### 3.1 選択比率の条件間差（Wilcoxon検定）\n")
   print(test_results$choice_test)
   
-  cat("\n## 3. 追加の分析\n\n")
-  cat("### 3.1 ラウンド効果\n")
-  # ラウンド効果の分析を追加
+  cat("\n## 4. 追加の分析\n\n")
+  cat("### 4.1 ラウンド効果\n")
   round_effects <- lmer(choice_X ~ condition + (1|participant.code) + (1|subsession.round_number), 
                        data = data_all)
   print(summary(round_effects))
@@ -507,8 +579,71 @@ analyze_time_trends <- function(data) {
   ))
 }
 
+# 条件間の社会的選好パラメータの比較
+compare_social_preferences <- function(results) {
+  # 結果をデータフレームに整形
+  comparison_df <- results %>%
+    mutate(
+      alpha_ci_lower = alpha - 1.96 * alpha_se,
+      alpha_ci_upper = alpha + 1.96 * alpha_se,
+      beta_ci_lower = beta - 1.96 * beta_se,
+      beta_ci_upper = beta + 1.96 * beta_se,
+      lambda_ci_lower = lambda - 1.96 * lambda_se,
+      lambda_ci_upper = lambda + 1.96 * lambda_se
+    )
+  
+  # 結果の出力
+  cat("\n=== 条件間の社会的選好パラメータ比較 ===\n\n")
+  
+  # 各条件のパラメータ推定値と95%信頼区間
+  cat("1. 条件ごとのパラメータ推定値（95%信頼区間）:\n")
+  for (cond in unique(comparison_df$condition)) {
+    cat(sprintf("\n%s条件:\n", cond))
+    cond_data <- comparison_df %>% filter(condition == cond)
+    if (!all(is.na(cond_data$alpha))) {
+      cat(sprintf("α (不利な不平等回避) = %.3f (%.3f, %.3f)\n", 
+                 cond_data$alpha, cond_data$alpha_ci_lower, cond_data$alpha_ci_upper))
+      cat(sprintf("β (有利な不平等回避) = %.3f (%.3f, %.3f)\n", 
+                 cond_data$beta, cond_data$beta_ci_lower, cond_data$beta_ci_upper))
+      cat(sprintf("λ (選択の感度) = %.3f (%.3f, %.3f)\n", 
+                 cond_data$lambda, cond_data$lambda_ci_lower, cond_data$lambda_ci_upper))
+    } else {
+      cat("パラメータの推定に失敗しました\n")
+    }
+  }
+  
+  # 条件間の差の計算（AI - Control）
+  if (nrow(comparison_df) == 2 && !any(is.na(comparison_df$alpha))) {
+    ai_data <- comparison_df %>% filter(condition == "AI")
+    control_data <- comparison_df %>% filter(condition == "Control")
+    
+    cat("\n2. 条件間の差（AI - Control）:\n")
+    cat(sprintf("Δα = %.3f\n", ai_data$alpha - control_data$alpha))
+    cat(sprintf("Δβ = %.3f\n", ai_data$beta - control_data$beta))
+    cat(sprintf("Δλ = %.3f\n", ai_data$lambda - control_data$lambda))
+    
+    # 差の標準誤差（独立を仮定）
+    se_diff_alpha <- sqrt(ai_data$alpha_se^2 + control_data$alpha_se^2)
+    se_diff_beta <- sqrt(ai_data$beta_se^2 + control_data$beta_se^2)
+    se_diff_lambda <- sqrt(ai_data$lambda_se^2 + control_data$lambda_se^2)
+    
+    # z統計量とp値の計算
+    z_alpha <- (ai_data$alpha - control_data$alpha) / se_diff_alpha
+    z_beta <- (ai_data$beta - control_data$beta) / se_diff_beta
+    z_lambda <- (ai_data$lambda - control_data$lambda) / se_diff_lambda
+    
+    cat("\n3. 統計的検定（z検定）:\n")
+    cat(sprintf("α: z = %.3f, p = %.3f\n", z_alpha, 2 * (1 - pnorm(abs(z_alpha)))))
+    cat(sprintf("β: z = %.3f, p = %.3f\n", z_beta, 2 * (1 - pnorm(abs(z_beta)))))
+    cat(sprintf("λ: z = %.3f, p = %.3f\n", z_lambda, 2 * (1 - pnorm(abs(z_lambda)))))
+  }
+  
+  return(comparison_df)
+}
+
 # メイン実行部分
 results <- estimate_by_condition(data_all)
+comparison_results <- compare_social_preferences(results)
 plots <- plot_social_preferences(results)
 test_results <- conduct_statistical_tests(data_all, results)
 time_analysis <- analyze_time_trends(data_all)
