@@ -103,28 +103,48 @@ data_all <- bind_rows(data_ai, data_control)
 
 # 社会的選好パラメータの推定のための尤度関数
 likelihood_function <- function(params, data) {
-  alpha <- params[1]
-  beta <- params[2]
-  lambda <- 1  # 選択の感度パラメータ（固定）
+  alpha <- params[1]  # 不利な不平等に対する回避度
+  beta <- params[2]   # 有利な不平等に対する回避度
+  lambda <- params[3] # 選択の感度パラメータ
   
-  # 効用関数の計算
-  utility_diff <- with(data, {
-    dictator_diff <- player.payoff_dictator * (choice_X - (1 - choice_X))
-    receiver_diff <- player.payoff_receiver * (choice_X - (1 - choice_X))
+  # 効用関数の計算（Bruhin et al. 2019の定式化に基づく）
+  utility_X <- with(data, {
+    # 不平等指標の計算
+    s <- as.integer(player.payoff_receiver > player.payoff_dictator)
+    r <- as.integer(player.payoff_dictator > player.payoff_receiver)
     
-    base_utility <- dictator_diff
-    inequality_disutility <- alpha * s * receiver_diff + beta * r * receiver_diff
+    # 効用関数: u_D(π_D, π_R) = (1 - αs - βr)π_D + (αs + βr)π_R
+    (1 - alpha * s - beta * r) * player.payoff_dictator / 1000 + 
+    (alpha * s + beta * r) * player.payoff_receiver / 1000
+  })
+
+  utility_Y <- with(data, {
+    # 選択Yの場合の利得
+    payoff_dictator_Y <- 1000 - player.payoff_dictator
+    payoff_receiver_Y <- 1000 - player.payoff_receiver
     
-    (base_utility + inequality_disutility) / 100  # スケーリング
+    # 不平等指標の計算（選択Yの場合）
+    s <- as.integer(payoff_receiver_Y > payoff_dictator_Y)
+    r <- as.integer(payoff_dictator_Y > payoff_receiver_Y)
+    
+    # 効用関数: u_D(π_D, π_R) = (1 - αs - βr)π_D + (αs + βr)π_R
+    (1 - alpha * s - beta * r) * payoff_dictator_Y / 1000 + 
+    (alpha * s + beta * r) * payoff_receiver_Y / 1000
   })
   
-  # ロジット選択確率
+  # 効用差の計算
+  utility_diff <- utility_X - utility_Y
+  
+  # ロジット選択確率の計算
   prob <- 1 / (1 + exp(-lambda * utility_diff))
+  
+  # 数値的安定性のための調整
   prob <- pmin(pmax(prob, .Machine$double.eps), 1 - .Machine$double.eps)
   
   # 対数尤度の計算
   log_likelihood <- sum(data$choice_X * log(prob) + (1 - data$choice_X) * log(1 - prob), na.rm = TRUE)
   
+  # 無限大や非数値をチェック
   if (!is.finite(log_likelihood)) {
     return(.Machine$double.xmax)
   }
@@ -141,115 +161,146 @@ estimate_social_preferences <- function(data) {
            !is.na(player.payoff_receiver)) %>%
     group_by(participant.code) %>%
     mutate(
-      round_normalized = scale(subsession.round_number),
-      payoff_diff = player.payoff_dictator - player.payoff_receiver,
-      payoff_sum = player.payoff_dictator + player.payoff_receiver,
-      payoff_ratio = player.payoff_dictator / player.payoff_receiver
+      s = as.integer(player.payoff_receiver > player.payoff_dictator),
+      r = as.integer(player.payoff_dictator > player.payoff_receiver),
+      total_payoff = player.payoff_dictator + player.payoff_receiver,
+      diff_payoff = player.payoff_dictator - player.payoff_receiver,
+      choice_prop = mean(choice_X)
     ) %>%
     ungroup()
   
   print(paste("前処理後の参加者数:", n_distinct(clean_data$participant.code)))
   print(paste("前処理後の観測数:", nrow(clean_data)))
+  print("\n選択比率の分布:")
+  print(summary(clean_data$choice_prop))
+  print("\n不平等指標の分布:")
+  print("s (不利な不平等):")
+  print(table(clean_data$s))
+  print("r (有利な不平等):")
+  print(table(clean_data$r))
   
   if (nrow(clean_data) == 0) {
     stop("有効なデータがありません")
   }
   
-  # 複数の初期値での推定
-  start_points <- list(
-    c(0.2, 0.2),
-    c(0.4, 0.4),
-    c(0.6, 0.6),
-    c(0.3, 0.5),
-    c(0.5, 0.3)
-  )
+  # より細かいグリッドサーチ
+  alpha_grid <- seq(0.1, 0.9, by = 0.1)
+  beta_grid <- seq(0.1, 0.9, by = 0.1)
+  lambda_grid <- seq(0.5, 5.0, by = 0.5)
   
-  results <- lapply(start_points, function(start) {
+  grid_results <- expand.grid(alpha = alpha_grid, beta = beta_grid, lambda = lambda_grid)
+  grid_results$value <- apply(grid_results, 1, function(params) {
     tryCatch({
-      result <- optim(
-        par = start,
-        fn = likelihood_function,
-        data = clean_data,
-        method = "L-BFGS-B",
-        lower = c(0, 0),
-        upper = c(0.99, 0.99),  # 境界値を避ける
-        control = list(
-          maxit = 2000,
-          factr = 1e7,
-          pgtol = 1e-5
-        )
-      )
-      
-      if (result$convergence != 0) {
-        return(NULL)
-      }
-      
-      # 結果の妥当性チェック
-      if (!all(is.finite(result$par)) || 
-          any(result$par < 0) || 
-          any(result$par > 1)) {
-        return(NULL)
-      }
-      
-      return(result)
-    }, error = function(e) NULL)
+      likelihood_function(params, clean_data)
+    }, error = function(e) Inf)
   })
   
-  # 最良の結果を選択
-  valid_results <- results[!sapply(results, is.null)]
-  if (length(valid_results) == 0) {
-    warning("全ての最適化が失敗しました")
-    return(list(
-      par = c(NA, NA),
-      value = NA,
-      convergence = -1,
-      se = c(NA, NA)
-    ))
-  }
+  # 最良の初期値を選択（上位10個）
+  best_starts <- grid_results[order(grid_results$value), ][1:10, 1:3]
+  print("\nグリッドサーチの結果（上位10個）:")
+  print(best_starts)
   
-  values <- sapply(valid_results, function(x) x$value)
-  best_index <- which.min(values)
-  result <- valid_results[[best_index]]
+  # 複数の最適化アルゴリズムを試す
+  methods <- c("L-BFGS-B", "Nelder-Mead", "BFGS")
+  １all_results <- list()
   
-  # ブートストラップによる信頼区間の計算
-  n_bootstrap <- 1000
-  bootstrap_params <- matrix(NA, nrow = n_bootstrap, ncol = 2)
-  
-  for (i in 1:n_bootstrap) {
-    bootstrap_participants <- sample(unique(clean_data$participant.code), 
-                                  replace = TRUE)
-    bootstrap_data <- clean_data %>%
-      filter(participant.code %in% bootstrap_participants)
-    
-    boot_result <- tryCatch({
-      optim(
-        par = result$par,
-        fn = likelihood_function,
-        data = bootstrap_data,
-        method = "L-BFGS-B",
-        lower = c(0, 0),
-        upper = c(0.99, 0.99),
-        control = list(
-          maxit = 1000,
-          factr = 1e7,
-          pgtol = 1e-5
+  for (method in methods) {
+    for (i in 1:nrow(best_starts)) {
+      start <- unlist(best_starts[i, ])
+      tryCatch({
+        result <- optim(
+          par = start,
+          fn = likelihood_function,
+          data = clean_data,
+          method = method,
+          lower = c(0.01, 0.01, 0.1),
+          upper = c(0.99, 0.99, 10.0),
+          control = list(
+            maxit = 10000,
+            reltol = 1e-8,
+            factr = 1e7
+          ),
+          hessian = TRUE
         )
-      )
-    }, error = function(e) NULL)
-    
-    if (!is.null(boot_result) && boot_result$convergence == 0) {
-      bootstrap_params[i,] <- boot_result$par
+        
+        if (result$convergence == 0) {
+          # 標準誤差の計算
+          if (all(is.finite(result$hessian)) && det(result$hessian) > 1e-10) {
+            se <- sqrt(diag(solve(result$hessian)))
+            if (all(se < 1)) {  # 標準誤差が妥当な範囲内かチェック
+              result$se <- se
+              result$method <- method
+              all_results[[length(all_results) + 1]] <- result
+            }
+          }
+        }
+      }, error = function(e) NULL)
     }
   }
   
-  # 信頼区間の計算
-  ci <- apply(bootstrap_params, 2, quantile, probs = c(0.025, 0.975), na.rm = TRUE)
-  se <- apply(bootstrap_params, 2, sd, na.rm = TRUE)
+  # 最良の結果を選択
+  if (length(all_results) == 0) {
+    warning("全ての最適化が失敗しました")
+    return(list(
+      par = c(NA, NA, NA),
+      value = NA,
+      convergence = -1,
+      se = c(NA, NA, NA)
+    ))
+  }
   
-  # 結果の拡張
-  result$se <- se
-  result$ci <- ci
-  return(result)
+  # 対数尤度が最大で、かつ標準誤差が妥当な結果を選択
+  values <- sapply(all_results, function(x) x$value)
+  best_idx <- which.min(values)
+  best_result <- all_results[[best_idx]]
+  
+  # 結果の詳細を表示
+  print("\n最適化結果:")
+  print(paste("使用したアルゴリズム:", best_result$method))
+  print(paste("α =", round(best_result$par[1], 3), "±", round(best_result$se[1], 3)))
+  print(paste("β =", round(best_result$par[2], 3), "±", round(best_result$se[2], 3)))
+  print(paste("λ =", round(best_result$par[3], 3), "±", round(best_result$se[3], 3)))
+  print(paste("対数尤度 =", -best_result$value))
+  print(paste("収束状態 =", best_result$convergence))
+  
+  return(best_result)
+}
+
+# ブートストラップによる標準誤差の計算
+calculate_bootstrap_se <- function(data, params) {
+  n_bootstrap <- 1000
+  bootstrap_params <- matrix(NA, nrow = n_bootstrap, ncol = length(params))
+  
+  for (i in 1:n_bootstrap) {
+    # データの再サンプリング
+    bootstrap_indices <- sample(1:nrow(data), replace = TRUE)
+    bootstrap_data <- data[bootstrap_indices, ]
+    
+    # パラメータ推定
+    result <- tryCatch({
+      optim(
+        par = params,
+        fn = likelihood_function,
+        data = bootstrap_data,
+        method = "L-BFGS-B",
+        lower = c(0.001, 0.001, 0.1),
+        upper = c(0.9, 0.9, 3.0),
+        control = list(
+          maxit = 1000,
+          factr = 1e3,
+          pgtol = 1e-10
+        )
+      )
+    }, error = function(e) NULL)
+    
+    if (!is.null(result) && result$convergence == 0) {
+      bootstrap_params[i, ] <- result$par
+    }
+  }
+  
+  # 標準誤差の計算
+  se <- apply(bootstrap_params, 2, sd, na.rm = TRUE)
+  return(se)
 }
 
 # 条件ごとのパラメータ推定
@@ -261,8 +312,10 @@ estimate_by_condition <- function(data) {
       tibble(
         alpha = est$par[1],
         beta = est$par[2],
+        lambda = est$par[3],
         alpha_se = est$se[1],
         beta_se = est$se[2],
+        lambda_se = est$se[3],
         convergence = est$convergence,
         log_likelihood = -est$value
       )
