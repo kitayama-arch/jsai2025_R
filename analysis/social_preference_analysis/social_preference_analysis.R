@@ -171,15 +171,12 @@ likelihood_function <- function(params, data) {
   # 対数尤度の計算
   log_likelihood <- sum(data$choice_X * log(prob) + (1 - data$choice_X) * log(1 - prob), na.rm = TRUE)
   
-  # L2正則化項の追加（改善1）
-  regularization <- 0.01 * sum(params^2)
-  
   # 無限大や非数値をチェック
   if (!is.finite(log_likelihood)) {
     return(.Machine$double.xmax)
   }
   
-  return(-log_likelihood + regularization)
+  return(-log_likelihood)
 }
 
 # パラメータ推定関数の改善
@@ -199,21 +196,6 @@ estimate_social_preferences <- function(data) {
     ) %>%
     ungroup()
   
-  # デバッグ情報の追加
-  print("=== データ構造の詳細 ===")
-  print("選択パターンの分布:")
-  print(table(clean_data$choice_X))
-  print("\n支払いの分布:")
-  print("Dictator支払い:")
-  print(summary(clean_data$player.payoff_dictator))
-  print("Receiver支払い:")
-  print(summary(clean_data$player.payoff_receiver))
-  print("\n不平等の分布:")
-  print("有利な不平等の割合:")
-  print(mean(clean_data$r))
-  print("不利な不平等の割合:")
-  print(mean(clean_data$s))
-  
   # データの状態を出力
   print(paste("前処理後の参加者数:", n_distinct(clean_data$participant.code)))
   print(paste("前処理後の観測数:", nrow(clean_data)))
@@ -230,9 +212,9 @@ estimate_social_preferences <- function(data) {
   }
   
   # より広いグリッドサーチ（改善1: より広い範囲）
-  alpha_grid <- seq(-1.0, 1.0, by = 0.1)  # 範囲を拡大
-  beta_grid <- seq(-1.0, 1.0, by = 0.1)   # 範囲を拡大
-  lambda_grid <- seq(0.1, 20.0, by = 0.5)  # 範囲を拡大
+  alpha_grid <- seq(-0.5, 0.5, by = 0.05)  # 負の値も含める
+  beta_grid <- seq(-0.5, 0.5, by = 0.05)   # 負の値も含める
+  lambda_grid <- seq(0.1, 15.0, by = 0.5)  # より広い範囲
   
   grid_results <- expand.grid(alpha = alpha_grid, beta = beta_grid, lambda = lambda_grid)
   grid_results$value <- apply(grid_results, 1, function(params) {
@@ -242,18 +224,19 @@ estimate_social_preferences <- function(data) {
   })
   
   # 最良の初期値を選択（改善2: より多くの初期値）
-  best_starts <- grid_results[order(grid_results$value), ][1:50, 1:3]  # 上位50個に増やす
-  print("\nグリッドサーチの結果（上位50個）:")
+  best_starts <- grid_results[order(grid_results$value), ][1:30, 1:3]  # 上位30個に増やす
+  print("\nグリッドサーチの結果（上位30個）:")
   print(best_starts)
   
   # より多様な最適化アルゴリズムを試す（改善3）
-  methods <- c("L-BFGS-B", "Nelder-Mead", "BFGS", "CG", "SANN")
+  methods <- c("L-BFGS-B", "Nelder-Mead", "BFGS", "CG", "SANN")  # SANNを追加
   all_results <- list()
   
   for (method in methods) {
     for (i in 1:nrow(best_starts)) {
       start <- unlist(best_starts[i, ])
       tryCatch({
+        # SANNの場合は異なるパラメータを使用
         if (method == "SANN") {
           result <- optim(
             par = start,
@@ -261,10 +244,9 @@ estimate_social_preferences <- function(data) {
             data = clean_data,
             method = method,
             control = list(
-              maxit = 100000,
-              temp = 10,        # 温度パラメータを調整
-              tmax = 100,       # 最大温度を増加
-              reltol = 1e-12    # より厳密な収束基準
+              maxit = 50000,
+              temp = 10,
+              tmax = 10
             )
           )
         } else {
@@ -273,37 +255,29 @@ estimate_social_preferences <- function(data) {
             fn = likelihood_function,
             data = clean_data,
             method = method,
-            lower = c(-1.0, -1.0, 0.1),
-            upper = c(1.0, 1.0, 20.0),
+            lower = c(-0.5, -0.5, 0.1),  # 下限を緩和
+            upper = c(0.5, 0.5, 15.0),   # 上限を緩和
             control = list(
-              maxit = 100000,
-              parscale = c(0.1, 0.1, 1.0),  # パラメータのスケールを調整
-              reltol = 1e-12,                # より厳密な収束基準
-              factr = 1e4,                   # 収束判定をより厳密に
-              pgtol = 1e-10                  # 勾配に対する収束基準を厳密に
+              maxit = 50000,     # より多くの反復回数
+              reltol = 1e-12,    # より厳密な収束基準
+              factr = 1e3,       # より緩やかな収束基準
+              pgtol = 1e-10      # 勾配に対する収束基準
             ),
             hessian = TRUE
           )
         }
         
         if (result$convergence == 0) {
-          # 標準誤差の計算を改善（改善3）
-          if (!method == "SANN" && all(is.finite(result$hessian))) {
-            # ヘッシアン行列の条件数をチェック
-            cond_num <- kappa(result$hessian)
-            if (cond_num < 1e8) {  # 条件数の閾値を調整
-              # 正則化を考慮した標準誤差の計算
-              hessian_reg <- result$hessian + diag(0.01, nrow(result$hessian))
-              se <- try(sqrt(diag(solve(hessian_reg))), silent = TRUE)
-              if (!inherits(se, "try-error") && all(se < 1)) {
-                result$se <- se
-                result$method <- method
-                result$condition_number <- cond_num
-                all_results[[length(all_results) + 1]] <- result
-              }
+          # 標準誤差の計算
+          if (!method == "SANN" && all(is.finite(result$hessian)) && det(result$hessian) > 1e-10) {
+            se <- sqrt(diag(solve(result$hessian)))
+            if (all(se < 1)) {  # 標準誤差が妥当な範囲内かチェック
+              result$se <- se
+              result$method <- method
+              all_results[[length(all_results) + 1]] <- result
             }
           } else if (method == "SANN") {
-            # SANNの場合はブートストラップで標準誤差を計算
+            # SANNの場合は標準誤差を別途計算
             se <- calculate_bootstrap_se(clean_data, result$par)
             if (all(se < 1)) {
               result$se <- se
@@ -316,7 +290,7 @@ estimate_social_preferences <- function(data) {
     }
   }
   
-  # 最良の結果を選択（改善4: より厳密な選択基準）
+  # 最良の結果を選択
   if (length(all_results) == 0) {
     warning("全ての最適化が失敗しました")
     return(list(
@@ -327,30 +301,10 @@ estimate_social_preferences <- function(data) {
     ))
   }
   
-  # 収束した結果の中から、以下の基準で最良のものを選択:
-  # 1. 対数尤度が最大
-  # 2. パラメータが理論的に妥当な範囲内
-  # 3. 標準誤差が適切
-  valid_results <- Filter(function(x) {
-    all(abs(x$par) < 1) &&  # パラメータが妥当な範囲内
-    all(x$se < 0.5) &&      # 標準誤差が適度に小さい
-    x$convergence == 0       # 収束している
-  }, all_results)
-  
-  if (length(valid_results) == 0) {
-    warning("有効な推定結果が得られませんでした")
-    return(list(
-      par = c(NA, NA, NA),
-      value = NA,
-      convergence = -1,
-      se = c(NA, NA, NA)
-    ))
-  }
-  
-  # 対数尤度が最大の結果を選択
-  values <- sapply(valid_results, function(x) x$value)
+  # 対数尤度が最大で、かつ標準誤差が妥当な結果を選択
+  values <- sapply(all_results, function(x) x$value)
   best_idx <- which.min(values)
-  best_result <- valid_results[[best_idx]]
+  best_result <- all_results[[best_idx]]
   
   # 結果の詳細を表示
   print("\n最適化結果:")
@@ -360,44 +314,19 @@ estimate_social_preferences <- function(data) {
   print(paste("λ =", round(best_result$par[3], 3), "±", round(best_result$se[3], 3)))
   print(paste("対数尤度 =", -best_result$value))
   print(paste("収束状態 =", best_result$convergence))
-  if (!is.null(best_result$condition_number)) {
-    print(paste("ヘッシアン行列の条件数 =", best_result$condition_number))
-  }
-  
-  # 最適化結果の詳細情報を追加
-  if (length(valid_results) > 0) {
-    print("\n最適化の詳細情報:")
-    for (i in seq_along(valid_results)) {
-      result <- valid_results[[i]]
-      print(sprintf("\n結果 %d:", i))
-      print(sprintf("方法: %s", result$method))
-      print(sprintf("収束状態: %d", result$convergence))
-      print(sprintf("反復回数: %d", result$counts[1]))
-      print(sprintf("対数尤度: %.3f", -result$value))
-      if (!is.null(result$condition_number)) {
-        print(sprintf("条件数: %.3e", result$condition_number))
-      }
-      print("パラメータ:")
-      print(result$par)
-      print("標準誤差:")
-      print(result$se)
-    }
-  }
   
   return(best_result)
 }
 
-# ブートストラップによる標準誤差の計算を改善
+# ブートストラップによる標準誤差の計算
 calculate_bootstrap_se <- function(data, params) {
-  n_bootstrap <- 2000  # ブートストラップ回数を増加
+  n_bootstrap <- 1000
   bootstrap_params <- matrix(NA, nrow = n_bootstrap, ncol = length(params))
   
   for (i in 1:n_bootstrap) {
-    # データの再サンプリング（参加者レベルでクラスター化）
-    participants <- unique(data$participant.code)
-    bootstrap_participants <- sample(participants, replace = TRUE)
-    bootstrap_data <- data %>%
-      filter(participant.code %in% bootstrap_participants)
+    # データの再サンプリング
+    bootstrap_indices <- sample(1:nrow(data), replace = TRUE)
+    bootstrap_data <- data[bootstrap_indices, ]
     
     # パラメータ推定
     result <- tryCatch({
@@ -406,12 +335,12 @@ calculate_bootstrap_se <- function(data, params) {
         fn = likelihood_function,
         data = bootstrap_data,
         method = "L-BFGS-B",
-        lower = c(-1.0, -1.0, 0.1),
-        upper = c(1.0, 1.0, 20.0),
+        lower = c(0.001, 0.001, 0.1),
+        upper = c(0.9, 0.9, 3.0),
         control = list(
           maxit = 1000,
-          factr = 1e7,
-          pgtol = 1e-8
+          factr = 1e3,
+          pgtol = 1e-10
         )
       )
     }, error = function(e) NULL)
@@ -421,8 +350,8 @@ calculate_bootstrap_se <- function(data, params) {
     }
   }
   
-  # 標準誤差の計算（NaNを除外）
-  se <- apply(bootstrap_params, 2, function(x) sd(x[!is.na(x)]))
+  # 標準誤差の計算
+  se <- apply(bootstrap_params, 2, sd, na.rm = TRUE)
   return(se)
 }
 
@@ -450,12 +379,8 @@ plot_social_preferences <- function(results) {
   # パラメータプロット
   param_plot <- ggplot(results, aes(x = alpha, y = beta, color = condition)) +
     geom_point(size = 3) +
-    geom_errorbar(aes(ymin = beta - pmax(beta_se, 0.001), 
-                     ymax = beta + pmax(beta_se, 0.001)), 
-                 width = 0.05) +
-    geom_errorbarh(aes(xmin = alpha - pmax(alpha_se, 0.001), 
-                      xmax = alpha + pmax(alpha_se, 0.001)), 
-                  height = 0.05) +
+    geom_errorbar(aes(ymin = beta - beta_se, ymax = beta + beta_se), width = 0.05) +
+    geom_errorbarh(aes(xmin = alpha - alpha_se, xmax = alpha + alpha_se), height = 0.05) +
     labs(
       title = "社会的選好パラメータの推定結果",
       x = "α (不利な不平等回避)",
@@ -469,7 +394,7 @@ plot_social_preferences <- function(results) {
       axis.title = element_text(size = 12),
       legend.position = "bottom"
     ) +
-    coord_cartesian(xlim = c(-0.2, 0.2), ylim = c(-0.2, 0.2)) +  # 表示範囲を修正
+    coord_cartesian(xlim = c(0, 1), ylim = c(0, 1)) +
     geom_abline(intercept = 0, slope = 1, linetype = "dashed", alpha = 0.5)
   
   # 選択比率の分布プロット

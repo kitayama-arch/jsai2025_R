@@ -1,0 +1,284 @@
+---
+title: "社会的選好パラメータ分析"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    toc_depth: 3
+    number_sections: true
+    theme: cosmo
+    highlight: tango
+    df_print: paged
+    code_folding: show
+---
+
+```{r setup, include=FALSE}
+knitr::opts_knit$set(root.dir = "../..")
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  fig.width = 10,
+  fig.height = 6,
+  out.width = "100%",
+  fig.align = "center"
+)
+```
+
+# パッケージと初期設定
+
+```{r packages}
+library(tidyverse)
+library(stats)
+library(lme4)
+library(car)
+library(emmeans)
+library(optimx)
+```
+
+# データの読み込みと前処理
+
+## データ読み込み関数の定義
+```{r}
+handle_data_loading <- function(file_path) {
+  tryCatch({
+    data <- read_csv(file_path)
+    if (nrow(data) == 0) {
+      stop("データが空です: ", file_path)
+    }
+    return(data)
+  }, error = function(e) {
+    stop("データの読み込みエラー: ", file_path, "\n", e$message)
+  })
+}
+```
+
+## 実験データの読み込み
+```{r}
+# 選択肢データ
+payoff_scenarios <- handle_data_loading("Experiment/payoff_scenarios_analysis.csv")
+
+# AI条件のデータ
+data_0117_3 <- handle_data_loading("AI2025_data/20250117_3/dictator_app_2025-01-17.csv")
+data_0120_5 <- handle_data_loading("AI2025_data/20250120_5/dictator_app_2025-01-20.csv")
+
+# コントロール条件のデータ
+data_0117_4 <- handle_data_loading("AI2025_data/20250117_4/Base_dictator_app_2025-01-17.csv")
+data_0120_4 <- handle_data_loading("AI2025_data/20250120_4/Base_dictator_app_2025-01-20.csv")
+```
+
+## データクリーニング
+```{r}
+# AI条件のデータクリーニング
+data_0117_3_clean <- data_0117_3 %>%
+  filter(participant.visited == 1)
+
+data_0120_5_clean <- data_0120_5 %>%
+  filter(participant.visited == 1)
+
+# コントロール条件のデータクリーニング（ラウンド16を除外）
+data_0117_4_clean <- data_0117_4 %>%
+  filter(participant.visited == 1) %>%
+  filter(subsession.round_number != 16)
+
+data_0120_4_clean <- data_0120_4 %>%
+  filter(participant.visited == 1) %>%
+  filter(subsession.round_number != 16)
+```
+
+## データの統合と変数作成
+```{r}
+# データの前処理関数
+create_analysis_dataset <- function(data, condition) {
+  processed_data <- data %>%
+    mutate(
+      condition = condition,
+      choice_X = case_when(
+        player.choice == "X" ~ TRUE,
+        player.choice == "Y" ~ FALSE,
+        TRUE ~ NA
+      )
+    ) %>%
+    left_join(
+      payoff_scenarios %>% 
+        select(
+          Game,
+          Option_X_Dictator, Option_X_Receiver,
+          Option_Y_Dictator, Option_Y_Receiver
+        ),
+      by = c("subsession.round_number" = "Game")
+    )
+  
+  return(processed_data)
+}
+
+# AI条件のデータ統合
+data_ai <- bind_rows(
+  create_analysis_dataset(data_0117_3_clean, "AI"),
+  create_analysis_dataset(data_0120_5_clean, "AI")
+)
+
+# コントロール条件のデータ統合
+data_control <- bind_rows(
+  create_analysis_dataset(data_0117_4_clean, "Control"),
+  create_analysis_dataset(data_0120_4_clean, "Control")
+)
+
+# 全データの統合
+data_all <- bind_rows(data_ai, data_control)
+```
+
+# 社会的選好パラメータの推定
+
+## パラメータ推定関数
+```{r}
+# 尤度関数
+likelihood_function <- function(params, data) {
+  alpha <- params[1]  # 不利な不平等に対する回避度
+  beta <- params[2]   # 有利な不平等に対する回避度
+  lambda <- params[3] # 選択の感度パラメータ
+  
+  # 最大金額の計算
+  max_payoff <- max(c(data$Option_X_Dictator, data$Option_X_Receiver,
+                      data$Option_Y_Dictator, data$Option_Y_Receiver))
+  
+  # 効用関数の計算
+  utility_X <- with(data, {
+    s <- as.integer(Option_X_Receiver > Option_X_Dictator)
+    r <- as.integer(Option_X_Dictator > Option_X_Receiver)
+    (1 - alpha * s - beta * r) * Option_X_Dictator / max_payoff + 
+    (alpha * s + beta * r) * Option_X_Receiver / max_payoff
+  })
+  
+  utility_Y <- with(data, {
+    s <- as.integer(Option_Y_Receiver > Option_Y_Dictator)
+    r <- as.integer(Option_Y_Dictator > Option_Y_Receiver)
+    (1 - alpha * s - beta * r) * Option_Y_Dictator / max_payoff + 
+    (alpha * s + beta * r) * Option_Y_Receiver / max_payoff
+  })
+  
+  # 選択確率の計算
+  prob <- 1 / (1 + exp(-lambda * (utility_X - utility_Y)))
+  log_likelihood <- sum(data$choice_X * log(prob) + (1 - data$choice_X) * log(1 - prob), na.rm = TRUE)
+  
+  if (!is.finite(log_likelihood)) {
+    return(.Machine$double.xmax)
+  }
+  
+  return(-log_likelihood)
+}
+
+# パラメータ推定関数
+estimate_social_preferences <- function(data) {
+  # データの前処理
+  clean_data <- data %>%
+    filter(!is.na(choice_X)) %>%
+    group_by(participant.code) %>%
+    mutate(choice_prop = mean(choice_X)) %>%
+    ungroup()
+  
+  # グリッドサーチ
+  alpha_grid <- seq(-0.5, 0.5, by = 0.05)
+  beta_grid <- seq(-0.5, 0.5, by = 0.05)
+  lambda_grid <- seq(0.1, 15.0, by = 0.5)
+  
+  grid_results <- expand.grid(alpha = alpha_grid, beta = beta_grid, lambda = lambda_grid)
+  grid_results$value <- apply(grid_results, 1, function(params) {
+    tryCatch({
+      likelihood_function(params, clean_data)
+    }, error = function(e) Inf)
+  })
+  
+  # 最適化
+  best_start <- as.numeric(grid_results[which.min(grid_results$value), 1:3])
+  result <- optim(
+    par = best_start,
+    fn = likelihood_function,
+    data = clean_data,
+    method = "L-BFGS-B",
+    lower = c(-0.5, -0.5, 0.1),
+    upper = c(0.5, 0.5, 15.0),
+    hessian = TRUE
+  )
+  
+  # 標準誤差の計算
+  if (result$convergence == 0 && all(is.finite(result$hessian))) {
+    se <- sqrt(diag(solve(result$hessian)))
+  } else {
+    se <- rep(NA, 3)
+  }
+  
+  result$se <- se
+  return(result)
+}
+```
+
+## パラメータ推定の実行と結果
+```{r}
+# パラメータ推定の実行
+results_ai <- estimate_social_preferences(data_ai)
+results_control <- estimate_social_preferences(data_control)
+
+# 結果をデータフレームにまとめる
+results <- bind_rows(
+  tibble(
+    condition = "AI",
+    alpha = results_ai$par[1],
+    beta = results_ai$par[2],
+    lambda = results_ai$par[3],
+    alpha_se = results_ai$se[1],
+    beta_se = results_ai$se[2],
+    lambda_se = results_ai$se[3],
+    log_likelihood = -results_ai$value
+  ),
+  tibble(
+    condition = "Control",
+    alpha = results_control$par[1],
+    beta = results_control$par[2],
+    lambda = results_control$par[3],
+    alpha_se = results_control$se[1],
+    beta_se = results_control$se[2],
+    lambda_se = results_control$se[3],
+    log_likelihood = -results_control$value
+  )
+)
+
+# 結果の表示
+results %>%
+  knitr::kable(
+    col.names = c(
+      "条件", "α", "β", "λ",
+      "α (SE)", "β (SE)", "λ (SE)",
+      "対数尤度"
+    ),
+    digits = 3,
+    caption = "社会的選好パラメータの推定結果"
+  )
+```
+
+## パラメータ推定の可視化
+```{r}
+param_plot <- ggplot(results, aes(x = alpha, y = beta, color = condition)) +
+  geom_point(size = 3) +
+  geom_errorbar(aes(ymin = beta - beta_se, ymax = beta + beta_se), width = 0.05) +
+  geom_errorbarh(aes(xmin = alpha - alpha_se, xmax = alpha + alpha_se), height = 0.05) +
+  labs(
+    title = "社会的選好パラメータの推定結果",
+    x = "α (不利な不平等回避)",
+    y = "β (有利な不平等回避)"
+  ) +
+  theme_minimal() +
+  theme(
+    text = element_text(family = "HiraKakuProN-W3"),
+    plot.title = element_text(size = 14, face = "bold"),
+    axis.title = element_text(size = 12),
+    legend.position = "bottom"
+  )
+print(param_plot)
+```
+
+# 技術的詳細
+
+## 使用パッケージのバージョン
+```{r}
+sessionInfo()
