@@ -99,18 +99,10 @@ create_analysis_dataset <- function(data, condition) {
     ) %>%
     group_by(participant.code) %>%
     mutate(
-      choice_prop = mean(choice_X, na.rm = TRUE),
       total_rounds = n()
     ) %>%
     ungroup() %>%
     filter(total_rounds >= 10)  # 最低10ラウンド以上のデータを持つ参加者のみ
-  
-  # データの状態を確認
-  print(paste("条件:", condition))
-  print(paste("参加者数:", n_distinct(processed_data$participant.code)))
-  print(paste("総観測数:", nrow(processed_data)))
-  print("選択比率の要約:")
-  print(summary(processed_data$choice_prop))
   
   return(processed_data)
 }
@@ -191,25 +183,9 @@ estimate_social_preferences <- function(data) {
       s = as.integer(player.payoff_receiver > player.payoff_dictator),
       r = as.integer(player.payoff_dictator > player.payoff_receiver),
       total_payoff = player.payoff_dictator + player.payoff_receiver,
-      diff_payoff = player.payoff_dictator - player.payoff_receiver,
-      choice_prop = mean(choice_X)
+      diff_payoff = player.payoff_dictator - player.payoff_receiver
     ) %>%
     ungroup()
-  
-  # データの状態を出力
-  print(paste("前処理後の参加者数:", n_distinct(clean_data$participant.code)))
-  print(paste("前処理後の観測数:", nrow(clean_data)))
-  print("\n選択比率の分布:")
-  print(summary(clean_data$choice_prop))
-  print("\n不平等指標の分布:")
-  print("s (不利な不平等):")
-  print(table(clean_data$s))
-  print("r (有利な不平等):")
-  print(table(clean_data$r))
-  
-  if (nrow(clean_data) == 0) {
-    stop("有効なデータがありません")
-  }
   
   # より広いグリッドサーチ（改善1: より広い範囲）
   alpha_grid <- seq(-0.5, 0.5, by = 0.05)  # 負の値も含める
@@ -225,11 +201,10 @@ estimate_social_preferences <- function(data) {
   
   # 最良の初期値を選択（改善2: より多くの初期値）
   best_starts <- grid_results[order(grid_results$value), ][1:30, 1:3]  # 上位30個に増やす
-  print("\nグリッドサーチの結果（上位30個）:")
-  print(best_starts)
   
   # より多様な最適化アルゴリズムを試す（改善3）
   methods <- c("L-BFGS-B", "Nelder-Mead", "BFGS", "CG", "SANN")  # SANNを追加
+  
   all_results <- list()
   
   for (method in methods) {
@@ -306,15 +281,6 @@ estimate_social_preferences <- function(data) {
   best_idx <- which.min(values)
   best_result <- all_results[[best_idx]]
   
-  # 結果の詳細を表示
-  print("\n最適化結果:")
-  print(paste("使用したアルゴリズム:", best_result$method))
-  print(paste("α =", round(best_result$par[1], 3), "±", round(best_result$se[1], 3)))
-  print(paste("β =", round(best_result$par[2], 3), "±", round(best_result$se[2], 3)))
-  print(paste("λ =", round(best_result$par[3], 3), "±", round(best_result$se[3], 3)))
-  print(paste("対数尤度 =", -best_result$value))
-  print(paste("収束状態 =", best_result$convergence))
-  
   return(best_result)
 }
 
@@ -372,240 +338,6 @@ estimate_by_condition <- function(data) {
         log_likelihood = -est$value
       )
     })
-}
-
-# 結果の視覚化関数の改善
-plot_social_preferences <- function(results) {
-  # パラメータプロット
-  param_plot <- ggplot(results, aes(x = alpha, y = beta, color = condition)) +
-    geom_point(size = 3) +
-    geom_errorbar(aes(ymin = beta - beta_se, ymax = beta + beta_se), width = 0.05) +
-    geom_errorbarh(aes(xmin = alpha - alpha_se, xmax = alpha + alpha_se), height = 0.05) +
-    labs(
-      title = "社会的選好パラメータの推定結果",
-      x = "α (不利な不平等回避)",
-      y = "β (有利な不平等回避)",
-      color = "実験条件"
-    ) +
-    theme_minimal() +
-    theme(
-      text = element_text(family = "HiraKakuProN-W3"),
-      plot.title = element_text(size = 14, face = "bold"),
-      axis.title = element_text(size = 12),
-      legend.position = "bottom"
-    ) +
-    coord_cartesian(xlim = c(0, 1), ylim = c(0, 1)) +
-    geom_abline(intercept = 0, slope = 1, linetype = "dashed", alpha = 0.5)
-  
-  # 選択比率の分布プロット
-  choice_plot <- ggplot(data_all, aes(x = condition, y = choice_prop)) +
-    geom_boxplot(aes(fill = condition), alpha = 0.6) +
-    geom_jitter(width = 0.2, alpha = 0.4) +
-    labs(
-      title = "条件別の選択比率分布",
-      x = "実験条件",
-      y = "X選択の比率",
-      fill = "実験条件"
-    ) +
-    theme_minimal() +
-    theme(
-      text = element_text(family = "HiraKakuProN-W3"),
-      plot.title = element_text(size = 14, face = "bold"),
-      axis.title = element_text(size = 12),
-      legend.position = "bottom"
-    )
-  
-  # 時系列プロット
-  time_plot <- ggplot(data_all, aes(x = subsession.round_number, y = as.numeric(choice_X), color = condition)) +
-    stat_smooth(method = "loess", se = TRUE) +
-    labs(
-      title = "ラウンドごとの選択確率の推移",
-      x = "ラウンド",
-      y = "X選択の確率",
-      color = "実験条件"
-    ) +
-    theme_minimal() +
-    theme(
-      text = element_text(family = "HiraKakuProN-W3"),
-      plot.title = element_text(size = 14, face = "bold"),
-      axis.title = element_text(size = 12),
-      legend.position = "bottom"
-    )
-  
-  # プロットの保存
-  ggsave("analysis/social_preference_analysis/parameter_plot.png", param_plot, width = 8, height = 6)
-  ggsave("analysis/social_preference_analysis/choice_distribution.png", choice_plot, width = 8, height = 6)
-  ggsave("analysis/social_preference_analysis/time_series.png", time_plot, width = 8, height = 6)
-  
-  return(list(param_plot = param_plot, choice_plot = choice_plot, time_plot = time_plot))
-}
-
-# 統計的検定
-conduct_statistical_tests <- function(data, results) {
-  # 参加者レベルのデータを作成
-  participant_data <- data %>%
-    group_by(participant.code, condition) %>%
-    summarise(
-      choice_prop = mean(choice_X, na.rm = TRUE),
-      total_rounds = n(),
-      .groups = "drop"
-    )
-  
-  # 条件間の選択比率の差の検定
-  choice_test <- wilcox.test(choice_prop ~ condition, data = participant_data)
-  
-  # 結果の出力
-  cat("\n=== 統計的検定結果 ===\n")
-  
-  cat("\n1. 記述統計:\n")
-  summary_stats <- participant_data %>%
-    group_by(condition) %>%
-    summarise(
-      n = n(),
-      mean_prop = mean(choice_prop),
-      sd_prop = sd(choice_prop),
-      median_prop = median(choice_prop),
-      .groups = "drop"
-    )
-  print(summary_stats)
-  
-  cat("\n2. 選択比率の条件間差 (Wilcoxon検定):\n")
-  print(choice_test)
-  
-  # 結果のまとめ
-  test_results <- list(
-    choice_test = choice_test,
-    summary_stats = summary_stats
-  )
-  
-  return(test_results)
-}
-
-# 結果の保存
-save_analysis_results <- function(results, test_results, file_path = "analysis/social_preference_analysis/analysis_results.md") {
-  sink(file_path)
-  
-  cat("# 社会的選好パラメータ分析結果\n\n")
-  
-  cat("## 1. 社会的選好パラメータの推定結果\n\n")
-  cat("### 1.1 条件ごとのパラメータ推定値\n\n")
-  for (cond in unique(results$condition)) {
-    cat(sprintf("\n#### %s条件:\n", cond))
-    cond_data <- results %>% filter(condition == cond)
-    if (!all(is.na(cond_data$alpha))) {
-      cat(sprintf("- α (不利な不平等回避) = %.3f ± %.3f\n", 
-                 cond_data$alpha, cond_data$alpha_se))
-      cat(sprintf("- β (有利な不平等回避) = %.3f ± %.3f\n", 
-                 cond_data$beta, cond_data$beta_se))
-      cat(sprintf("- λ (選択の感度) = %.3f ± %.3f\n", 
-                 cond_data$lambda, cond_data$lambda_se))
-    } else {
-      cat("パラメータの推定に失敗しました\n")
-    }
-  }
-
-  cat("\n### 1.2 条件間の差（AI - Control）\n\n")
-  if (nrow(results) == 2 && !any(is.na(results$alpha))) {
-    ai_data <- results %>% filter(condition == "AI")
-    control_data <- results %>% filter(condition == "Control")
-    
-    # 差の計算
-    delta_alpha <- ai_data$alpha - control_data$alpha
-    delta_beta <- ai_data$beta - control_data$beta
-    delta_lambda <- ai_data$lambda - control_data$lambda
-    
-    # 標準誤差の計算
-    se_diff_alpha <- sqrt(ai_data$alpha_se^2 + control_data$alpha_se^2)
-    se_diff_beta <- sqrt(ai_data$beta_se^2 + control_data$beta_se^2)
-    se_diff_lambda <- sqrt(ai_data$lambda_se^2 + control_data$lambda_se^2)
-    
-    # z値とp値の計算
-    z_alpha <- delta_alpha / se_diff_alpha
-    z_beta <- delta_beta / se_diff_beta
-    z_lambda <- delta_lambda / se_diff_lambda
-    
-    p_alpha <- 2 * (1 - pnorm(abs(z_alpha)))
-    p_beta <- 2 * (1 - pnorm(abs(z_beta)))
-    p_lambda <- 2 * (1 - pnorm(abs(z_lambda)))
-    
-    cat("パラメータの差（AI - Control）:\n")
-    cat(sprintf("- Δα = %.3f ± %.3f (z = %.3f, p = %.3f)\n", 
-               delta_alpha, se_diff_alpha, z_alpha, p_alpha))
-    cat(sprintf("- Δβ = %.3f ± %.3f (z = %.3f, p = %.3f)\n", 
-               delta_beta, se_diff_beta, z_beta, p_beta))
-    cat(sprintf("- Δλ = %.3f ± %.3f (z = %.3f, p = %.3f)\n", 
-               delta_lambda, se_diff_lambda, z_lambda, p_lambda))
-  }
-  
-  cat("\n## 2. 記述統計\n\n")
-  print(test_results$summary_stats)
-  
-  cat("\n## 3. 統計的検定結果\n\n")
-  cat("### 3.1 選択比率の条件間差（Wilcoxon検定）\n")
-  print(test_results$choice_test)
-  
-  cat("\n## 4. 追加の分析\n\n")
-  cat("### 4.1 ラウンド効果\n")
-  round_effects <- lmer(choice_X ~ condition + (1|participant.code) + (1|subsession.round_number), 
-                       data = data_all)
-  print(summary(round_effects))
-  
-  sink()
-}
-
-# 時系列分析の追加
-analyze_time_trends <- function(data) {
-  # ラウンド効果のモデル
-  round_model <- lmer(choice_X ~ condition * scale(subsession.round_number) + 
-                       (1 + scale(subsession.round_number)|participant.code),
-                     data = data)
-  
-  # 選択の推移分析
-  choice_trends <- data %>%
-    group_by(condition, subsession.round_number) %>%
-    summarise(
-      choice_rate = mean(choice_X, na.rm = TRUE),
-      se = sd(choice_X, na.rm = TRUE) / sqrt(n()),
-      n = n(),
-      .groups = "drop"
-    )
-  
-  # 結果の出力
-  cat("\n=== 時系列分析結果 ===\n")
-  print(summary(round_model))
-  
-  # 時系列プロット
-  trend_plot <- ggplot(choice_trends, 
-                      aes(x = subsession.round_number, 
-                          y = choice_rate, 
-                          color = condition)) +
-    geom_line() +
-    geom_ribbon(aes(ymin = choice_rate - se, 
-                    ymax = choice_rate + se, 
-                    fill = condition), 
-                alpha = 0.2) +
-    labs(
-      title = "ラウンドごとの選択確率の推移",
-      x = "ラウンド",
-      y = "X選択の確率",
-      color = "実験条件",
-      fill = "実験条件"
-    ) +
-    theme_minimal() +
-    theme(
-      text = element_text(family = "HiraKakuProN-W3"),
-      plot.title = element_text(size = 14, face = "bold"),
-      axis.title = element_text(size = 12),
-      legend.position = "bottom"
-    )
-  
-  ggsave("analysis/social_preference_analysis/time_trends.png", trend_plot, width = 10, height = 6)
-  
-  return(list(
-    model = round_model,
-    trends = choice_trends,
-    plot = trend_plot
-  ))
 }
 
 # 条件間の社会的選好パラメータの比較
@@ -691,33 +423,7 @@ compare_social_preferences <- function(results) {
 # メイン実行部分
 results <- estimate_by_condition(data_all)
 comparison_results <- compare_social_preferences(results)
-plots <- plot_social_preferences(results)
-test_results <- conduct_statistical_tests(data_all, results)
-time_analysis <- analyze_time_trends(data_all)
-save_analysis_results(results, test_results)
 
 # 結果の表示
 print("=== 分析結果 ===")
 print(results)
-print("\n=== 時系列分析 ===")
-print(summary(time_analysis$model))
-
-# 追加の可視化：ラウンドごとの選択パターン
-round_pattern_plot <- ggplot(data_all, aes(x = subsession.round_number, fill = condition)) +
-  geom_bar(position = "dodge") +
-  facet_wrap(~condition) +
-  labs(
-    title = "ラウンドごとの選択パターン",
-    x = "ラウンド",
-    y = "選択回数",
-    fill = "実験条件"
-  ) +
-  theme_minimal() +
-  theme(
-    text = element_text(family = "HiraKakuProN-W3"),
-    plot.title = element_text(size = 14, face = "bold"),
-    axis.title = element_text(size = 12),
-    legend.position = "bottom"
-  )
-
-ggsave("analysis/social_preference_analysis/round_pattern.png", round_pattern_plot, width = 10, height = 6)
