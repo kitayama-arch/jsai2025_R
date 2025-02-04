@@ -1,0 +1,221 @@
+# 社会的選好パラメータ分析プロトコル（Klockmann et al. 2022に準拠）
+
+目的
+- AI介入が不平等回避選好に与える影響の定量化 
+
+## 1. 分析の理論的枠組み
+Bruhin et al. (2019)のモデルに基づく効用関数：
+```
+u_D(π_D, π_R) = (1 - αs - βr)π_D + (αs + βr)π_R
+```
+- s: 受領者の利得が独裁者を上回る場合の指標（不利な不平等）
+- r: 独裁者の利得が受領者を上回る場合の指標（有利な不平等）
+- α: 不利な不平等回避パラメータ（嫉妬）
+- β: 有利な不平等回避パラメータ（共感）
+
+## 2. データ構造
+
+### 目的変数
+- 社会的選好パラメータ（α, β）
+  - α: 不利な不平等回避パラメータ（嫉妬）
+  - β: 有利な不平等回避パラメータ（共感）
+
+### 説明変数
+1. **基本的な選択データ**
+   - 独裁者ゲームでの2択の選択（X/Y）を30回繰り返し
+   - X: 常に独裁者にとって利得が高い選択肢
+   - Y: 常に独裁者にとって利得が低い選択肢
+
+2. **具体的な数値変数**
+   - πD_X: 選択肢Xでの独裁者の利得
+   - πR_X: 選択肢Xでの受領者の利得
+   - πD_Y: 選択肢Yでの独裁者の利得
+   - πR_Y: 選択肢Yでの受領者の利得
+
+3. **派生変数**
+   - 利得の合計 (πD + πR)
+   - 利得の差分 (πD - πR)
+   - 不平等指標
+     - s = 1{πR > πD} (不利な不平等)
+     - r = 1{πD > πR} (有利な不平等)
+
+4. **ゲームの特徴による分類**
+   - パレート支配関係の有無
+   - 利得の無差別性
+   - 利害の対立の有無
+   - 相対的な地位（advantageous/disadvantageous）
+
+## 3. データ準備手順
+
+### 3.1 データの読み込み
+```r
+# AI条件の独裁者ゲームデータ
+data_0117_3 <- read_csv("AI2025_data/20250117_3/dictator_app_2025-01-17.csv")
+data_0120_5 <- read_csv("AI2025_data/20250120_5/dictator_app_2025-01-20.csv")
+# コントロール条件の独裁者ゲームデータ
+data_0117_4 <- read_csv("AI2025_data/20250117_4/Base_dictator_app_2025-01-17.csv")
+data_0120_4 <- read_csv("AI2025_data/20250120_4/Base_dictator_app_2025-01-20.csv")
+```
+
+### 3.2 データクリーニング
+```r
+# AI条件のデータクリーニング
+data_0117_3_clean <- data_0117_3 %>%
+  filter(participant.visited == 1) %>%
+  filter(!is.na(player.payoff_dictator),
+         !is.na(player.payoff_receiver),
+         player.payoff_dictator > 0,
+         player.payoff_receiver > 0)
+
+data_0120_5_clean <- data_0120_5 %>%
+  filter(participant.visited == 1) %>%
+  filter(!is.na(player.payoff_dictator),
+         !is.na(player.payoff_receiver),
+         player.payoff_dictator > 0,
+         player.payoff_receiver > 0)
+
+# コントロール条件のデータクリーニング（ラウンド16を除外）
+data_0117_4_clean <- data_0117_4 %>%
+  filter(participant.visited == 1) %>%
+  filter(subsession.round_number != 16) %>%
+  filter(!is.na(player.payoff_dictator),
+         !is.na(player.payoff_receiver),
+         player.payoff_dictator > 0,
+         player.payoff_receiver > 0)
+
+data_0120_4_clean <- data_0120_4 %>%
+  filter(participant.visited == 1) %>%
+  filter(subsession.round_number != 16) %>%
+  filter(!is.na(player.payoff_dictator),
+         !is.na(player.payoff_receiver),
+         player.payoff_dictator > 0,
+         player.payoff_receiver > 0)
+```
+
+### 3.3 変数変換とデータ統合
+```r
+# AI条件のデータ統合と変数作成
+data_ai <- bind_rows(
+  data_0117_3_clean,
+  data_0120_5_clean
+) %>%
+  mutate(
+    condition = "AI",
+    s = as.integer(player.payoff_receiver > player.payoff_dictator),
+    r = as.integer(player.payoff_dictator > player.payoff_receiver),
+    total_payoff = player.payoff_dictator + player.payoff_receiver,
+    diff_payoff = player.payoff_dictator - player.payoff_receiver
+  )
+
+# コントロール条件のデータ統合と変数作成
+data_control <- bind_rows(
+  data_0117_4_clean,
+  data_0120_4_clean
+) %>%
+  mutate(
+    condition = "Control",
+    s = as.integer(player.payoff_receiver > player.payoff_dictator),
+    r = as.integer(player.payoff_dictator > player.payoff_receiver),
+    total_payoff = player.payoff_dictator + player.payoff_receiver,
+    diff_payoff = player.payoff_dictator - player.payoff_receiver
+  )
+
+# 全データの統合
+data_all <- bind_rows(data_ai, data_control)
+```
+
+### 3.4 分析用データセットの作成
+```r
+library(lmerTest)  # 混合効果モデルのため
+
+analysis_data <- data_all %>%
+  group_by(participant.code, condition) %>%
+  summarise(
+    mean_payoff_dictator = mean(player.payoff_dictator),
+    mean_payoff_receiver = mean(player.payoff_receiver),
+    prop_s = mean(s),
+    prop_r = mean(r),
+    n_obs = n(),  # 観測数チェック追加
+    .groups = 'drop'
+  ) %>%
+  filter(n_obs >= 10)  # 十分な観測数の参加者のみ保持
+```
+
+## 4. 推定手順
+1. **尤度関数の設定**
+   - ロジット選択確率を使用
+   - 効用差に基づく選択確率をモデル化
+   - 数値的安定性のためスケーリングを実施
+
+2. **最適化アルゴリズム**
+   - BFGS法を使用した制約付き最尤推定
+   - パラメータ範囲の制約（α, β ∈ [0,1]）
+   - 収束基準：tol=1e-8, reltol=1e-8
+
+3. **推定の診断**
+   - ヘッセ行列の正定値性チェック
+   - 標準誤差の妥当性確認
+   - 収束ステータスの検証
+
+## 5. パラメータの解釈基準
+1. **パラメータパターン分類**
+   - α > 0 & β > 0 → 普遍的利他性
+   - α > 0 & β ≈ 0 → 弱者保護指向
+   - α ≈ 0 & β > 0 → 効率性重視
+   - α < 0 & β < 0 → 自己利益最大化
+
+2. **治療効果の評価**
+   - パラメータ差の統計的有意性
+   - 信頼区間の重なり判定
+   - 効果サイズの解釈
+
+## 6. 分析上の注意点
+1. **モデル前提の検証**
+   - IIA（独立な選択肢の無関係性）の仮定
+   - 線形効用関数の適切性
+
+2. **頑健性チェック**
+   - 初期値依存性の検証
+   - サンプル分割による再現性確認
+   - 外れ値の影響分析
+
+3. **実験デザインの反映**
+   - 報酬構造の非対称性を考慮
+   - 世代間外部性の重み付け
+   - 役割不確実性の影響
+
+## 7. 報告項目
+1. **基本統計量**
+   - 条件別選択率分布
+   - 利得構造の要約統計
+
+2. **推定結果**
+   - パラメータ推定値と標準誤差
+   - 収束ステータス
+   - 弾力性係数
+
+3. **検定結果**
+   - 条件間差の信頼区間
+   - パラメータパターンの分類
+   - モデル適合度指標
+
+実験条件間比較では、Bonferroni-Holm法による多重比較補正を適用推奨
+
+# 社会的選好パラメータの推定例
+optim(
+  par = c(0.5, 0.5),  # 初期値
+  fn = likelihood_function,  # 尤度関数
+  method = "L-BFGS-B",  # 制約付き最適化手法
+  lower = c(0, 0),  # αとβの下限
+  upper = c(1, 1),  # αとβの上限
+  control = list(
+    maxit = 1000,    # 最大反復回数
+    reltol = 1e-8    # 収束判定基準
+  )
+)
+
+# emmeans を使用した対比分析例
+library(emmeans)
+model_results <- lmer(payoff ~ condition + (participant.code))
+emm <- emmeans(model_results, "condition")
+pairs(emm, adjust = "holm")  # Holm法による多重比較補正

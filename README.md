@@ -77,17 +77,59 @@ AI2025_R/
      - 選択データの抽出と統合（`bind_rows`による日付別データの結合）
 
 2. **社会的選好分析** (`socialPreference_analysis/socialPreference_analysis.R`)
-   - 使用変数：
-     - `player.payoff_dictator`, `player.payoff_receiver`（報酬額）
-     - 不平等指標：`s`（受け手有利）, `r`（独裁者有利）
-   - 分析内容：
-     - 効用関数の最尤推定による選好パラメータ（α, β）の推定
-     - 条件間での社会的選好パターンの比較
-     - 個人レベルでの選好パラメータの推定と分類
-   - データ処理：
-     - 選択を数値化（`choice_numeric`）
-     - 不平等指標の計算
-     - 効用関数の定義と最適化
+   - **使用変数**:
+     - 主要変数:
+       - `player.payoff_dictator`, `player.payoff_receiver`（報酬額）
+       - `s`（受け手有利の不平等: receiver - dictator）
+       - `r`（独裁者有利の不平等: dictator - receiver）
+     - 制御変数:
+       - `gender`, `age`, `equality_preference`（アンケートデータ）
+       - `condition`（AI/Control）
+       - `round_number`（学習効果調整）
+
+   - **分析内容**:
+     1. Fehr-Schmidtモデルに基づく効用関数の最尤推定:
+        ```math
+        U(x) = x_D - α・max{x_R - x_D, 0} - β・max{x_D - x_R, 0}
+        ```
+        ここでα: 不利な不平等回避, β: 有利な不平等回避
+     2. 条件間パラメータ比較（AI vs Control）:
+        - 混合効果モデルでα, βの条件間差を検定
+        - 尤度比検定によるモデル比較
+
+   - **理論的意義**:
+     - AI介入が不平等回避選好に与える影響の定量化
+     - 実験室測定された社会的選好と宣言的選好の乖離分析
+     - 文化比較研究（日本vs欧米）への知見提供
+
+   - **分析ステップ**:
+     1. データ前処理:
+        - 不平等指標の絶対値変換（対数正規分布対応）
+        - 選択データとアンケートデータのマージ
+        - 極端値処理（中央値±3MAD）
+
+     2. モデリング:
+        ```r
+        # 最尤推定のコアコード例
+        utility <- function(alpha, beta, dictator, receiver) {
+          inequality <- receiver - dictator
+          dictator - alpha*pmax(inequality, 0) - beta*pmax(-inequality, 0)
+        }
+        
+        # 混合効果モデル
+        me_model <- lmer(alpha ~ condition + (1|participant.id), 
+                       data = preference_params)
+        ```
+
+     3. 診断検証:
+        - パラメータ推定の頑健性チェック（ブートストラップ法）
+        - モデル適合度（AIC/BIC）
+        - 残差分析（正規性・等分散性）
+
+     4. 結果可視化:
+        - 条件別α-β散布図（95%信頼楕円付き）
+        - 個人別パラメータの密度プロット
+        - パラメータ空間のクラスタ可視化（t-SNE法）
 
 3. **条件間の平均の差の分析** (`payoff_avg_analysis/payoff_avg_analysis.R`)
    - 使用変数：`player.payoff`（報酬額）
