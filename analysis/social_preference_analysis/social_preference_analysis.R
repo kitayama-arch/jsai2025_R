@@ -1,371 +1,488 @@
-# AI2025実験 社会的選好パラメータ分析
-# 作成日: Sys.Date()
-
-# 1. 環境設定 ----
 # 必要なパッケージの読み込み
-if (!require("tidyverse")) install.packages("tidyverse")
-if (!require("maxLik")) install.packages("maxLik")
-if (!require("boot")) install.packages("boot")
-if (!require("gridExtra")) install.packages("gridExtra")
-
 library(tidyverse)
-library(maxLik)
-library(boot)
-library(gridExtra)
+library(stats)
+library(lme4)
+library(car)
+library(emmeans)
+library(optimx)
 
-# 2. データの読み込みと前処理 ----
-# AI条件のデータ
-data_0117_3 <- read_csv("AI2025_data/20250117_3/dictator_app_2025-01-17.csv")
-data_0120_5 <- read_csv("AI2025_data/20250120_5/dictator_app_2025-01-20.csv")
-# コントロール条件のデータ
-data_0117_4 <- read_csv("AI2025_data/20250117_4/Base_dictator_app_2025-01-17.csv")
-data_0120_4 <- read_csv("AI2025_data/20250120_4/Base_dictator_app_2025-01-20.csv")
-
-# データの確認
-print("=== データの確認 ===")
-print("AI条件（2025-01-17）のサンプル:")
-print(head(data_0117_3 %>% select(player.choice, player.payoff_dictator, player.payoff_receiver)))
-print("\n選択肢の分布:")
-print(table(data_0117_3$player.choice))
-
-# 前処理: 実際に参加した参加者のデータのみを抽出
-data_0117_3_clean <- data_0117_3 %>%
-  filter(participant.visited == 1) %>%
-  mutate(choice_numeric = ifelse(player.choice == "Y", 1, 0))
-
-data_0120_5_clean <- data_0120_5 %>%
-  filter(participant.visited == 1) %>%
-  mutate(choice_numeric = ifelse(player.choice == "Y", 1, 0))
-
-# ベースライン条件ではラウンド16を除外
-data_0117_4_clean <- data_0117_4 %>%
-  filter(participant.visited == 1) %>%
-  filter(subsession.round_number != 16) %>%
-  mutate(choice_numeric = ifelse(player.choice == "Y", 1, 0))
-
-data_0120_4_clean <- data_0120_4 %>%
-  filter(participant.visited == 1) %>%
-  filter(subsession.round_number != 16) %>%
-  mutate(choice_numeric = ifelse(player.choice == "Y", 1, 0))
-
-# データの統合
-ai_processed <- bind_rows(
-  data_0117_3_clean,
-  data_0120_5_clean
-) %>%
-  mutate(
-    s = as.numeric(player.payoff_receiver > player.payoff_dictator),
-    r = as.numeric(player.payoff_dictator > player.payoff_receiver)
-  )
-
-control_processed <- bind_rows(
-  data_0117_4_clean,
-  data_0120_4_clean
-) %>%
-  mutate(
-    s = as.numeric(player.payoff_receiver > player.payoff_dictator),
-    r = as.numeric(player.payoff_dictator > player.payoff_receiver)
-  )
-
-# 処理後のデータ確認
-print("\n=== 処理後のデータ確認 ===")
-print("AI条件の処理後データ（先頭5行）:")
-print(head(ai_processed %>% select(choice_numeric, player.payoff_dictator, player.payoff_receiver, s, r), 5))
-print("\nAI条件の要約統計量:")
-print(summary(ai_processed %>% select(choice_numeric, player.payoff_dictator, player.payoff_receiver, s, r)))
-
-# 3. 効用関数の定義と最尤推定 ----
-# テスト用の効用関数
-test_utility <- function(data, alpha = 0.3, beta = 0.2) {
-  utilities <- mapply(
-    function(ps, po) {
-      s <- as.numeric(po > ps)
-      r <- as.numeric(ps > po)
-      (1 - alpha * s - beta * r) * ps + (alpha * s + beta * r) * po
-    },
-    data$player.payoff_dictator,
-    data$player.payoff_receiver
-  )
-  return(utilities)
+# エラーハンドリング関数
+handle_data_loading <- function(file_path) {
+  tryCatch({
+    data <- read_csv(file_path)
+    if (nrow(data) == 0) {
+      stop("データが空です: ", file_path)
+    }
+    return(data)
+  }, error = function(e) {
+    stop("データの読み込みエラー: ", file_path, "\n", e$message)
+  })
 }
 
-# 効用関数のテスト
-print("\n=== 効用関数のテスト ===")
-test_results <- test_utility(head(ai_processed, 5))
-print("最初の5行の効用値:")
-print(test_results)
+# データの読み込み
+# AI条件の独裁者ゲームデータ
+data_0117_3 <- handle_data_loading("AI2025_data/20250117_3/dictator_app_2025-01-17.csv")
+data_0120_5 <- handle_data_loading("AI2025_data/20250120_5/dictator_app_2025-01-20.csv")
+# コントロール条件の独裁者ゲームデータ
+data_0117_4 <- handle_data_loading("AI2025_data/20250117_4/Base_dictator_app_2025-01-17.csv")
+data_0120_4 <- handle_data_loading("AI2025_data/20250120_4/Base_dictator_app_2025-01-20.csv")
 
-# 効用関数の定義
-utility <- function(payoff_self, payoff_other, alpha, beta) {
-  s <- as.numeric(payoff_other > payoff_self)
-  r <- as.numeric(payoff_self > payoff_other)
-  (1 - alpha * s - beta * r) * payoff_self + (alpha * s + beta * r) * payoff_other
-}
-
-# 対数尤度関数
-log_likelihood <- function(params, data) {
-  alpha <- params[1]
-  beta <- params[2]
+# データクリーニングと前処理
+clean_dictator_data <- function(data, is_control = FALSE) {
+  cleaned_data <- data %>%
+    filter(participant.visited == 1) %>%
+    filter(!is.na(player.payoff_dictator),
+           !is.na(player.payoff_receiver),
+           player.payoff_dictator > 0,
+           player.payoff_receiver > 0)
   
-  # パラメータの制約チェック
-  if(alpha < 0 || alpha > 1 || beta < 0 || beta > 1) return(-Inf)
-  
-  # 効用の計算
-  utilities <- mapply(
-    function(ps, po) utility(ps, po, alpha, beta),
-    data$player.payoff_dictator,
-    data$player.payoff_receiver
-  )
-  
-  # スケーリング（数値の安定性のため）
-  utilities <- utilities / 100
-  
-  # ロジスティック選択確率
-  probs <- 1 / (1 + exp(-utilities))
-  
-  # 数値の安定性のための調整
-  probs[probs > 0.999999] <- 0.999999
-  probs[probs < 0.000001] <- 0.000001
-  
-  # 対数尤度の計算
-  ll <- sum(data$choice_numeric * log(probs) + (1 - data$choice_numeric) * log(1 - probs))
-  
-  # NaNチェック
-  if (is.nan(ll) || is.infinite(ll)) {
-    warning("無効な対数尤度値が検出されました")
-    return(-Inf)
+  if (is_control) {
+    cleaned_data <- cleaned_data %>%
+      filter(subsession.round_number != 16)
   }
   
-  return(ll)
+  # データの妥当性チェック
+  if (nrow(cleaned_data) == 0) {
+    stop("クリーニング後のデータが空です")
+  }
+  
+  return(cleaned_data)
 }
 
-# 対数尤度関数のテスト
-print("\n=== 対数尤度関数のテスト ===")
-test_ll <- log_likelihood(c(0.3, 0.2), head(ai_processed, 5))
-print("最初の5行での対数尤度値:")
-print(test_ll)
+# データのクリーニング
+data_0117_3_clean <- clean_dictator_data(data_0117_3)
+data_0120_5_clean <- clean_dictator_data(data_0120_5)
+data_0117_4_clean <- clean_dictator_data(data_0117_4, is_control = TRUE)
+data_0120_4_clean <- clean_dictator_data(data_0120_4, is_control = TRUE)
 
-# パラメータ推定関数
-estimate_parameters <- function(data) {
-  # 初期値の設定
-  start_values <- c(alpha = 0.3, beta = 0.2)
-  
-  # 最適化の制約
-  lower <- c(0, 0)  # 下限
-  upper <- c(1, 1)  # 上限
-  
-  tryCatch({
-    result <- maxLik(
-      logLik = log_likelihood,
-      start = start_values,
-      method = "BFGS",
-      data = data,
-      control = list(
-        printLevel = 2,  # より詳細な出力
-        tol = 1e-8,     # 収束判定の閾値
-        reltol = 1e-8   # 相対的な収束判定の閾値
-      ),
-      constraints = list(
-        ineqA = rbind(diag(2), -diag(2)),
-        ineqB = c(upper, -lower)
+# データの統合と変数作成
+create_analysis_dataset <- function(data, condition) {
+  processed_data <- data %>%
+    mutate(
+      condition = condition,
+      s = as.integer(player.payoff_receiver > player.payoff_dictator),
+      r = as.integer(player.payoff_dictator > player.payoff_receiver),
+      total_payoff = player.payoff_dictator + player.payoff_receiver,
+      diff_payoff = player.payoff_dictator - player.payoff_receiver,
+      choice_X = case_when(
+        player.choice == "X" ~ TRUE,
+        player.choice == "Y" ~ FALSE,
+        TRUE ~ NA
       )
-    )
+    ) %>%
+    group_by(participant.code) %>%
+    mutate(
+      choice_prop = mean(choice_X, na.rm = TRUE),
+      total_rounds = n()
+    ) %>%
+    ungroup() %>%
+    filter(total_rounds >= 10)  # 最低10ラウンド以上のデータを持つ参加者のみ
+  
+  # データの状態を確認
+  print(paste("条件:", condition))
+  print(paste("参加者数:", n_distinct(processed_data$participant.code)))
+  print(paste("総観測数:", nrow(processed_data)))
+  print("選択比率の要約:")
+  print(summary(processed_data$choice_prop))
+  
+  return(processed_data)
+}
+
+# AI条件とコントロール条件のデータ統合
+data_ai <- bind_rows(
+  create_analysis_dataset(data_0117_3_clean, "AI"),
+  create_analysis_dataset(data_0120_5_clean, "AI")
+)
+
+data_control <- bind_rows(
+  create_analysis_dataset(data_0117_4_clean, "Control"),
+  create_analysis_dataset(data_0120_4_clean, "Control")
+)
+
+data_all <- bind_rows(data_ai, data_control)
+
+# 社会的選好パラメータの推定のための尤度関数
+likelihood_function <- function(params, data) {
+  alpha <- params[1]
+  beta <- params[2]
+  lambda <- 1  # 選択の感度パラメータ（固定）
+  
+  # 効用関数の計算
+  utility_diff <- with(data, {
+    dictator_diff <- player.payoff_dictator * (choice_X - (1 - choice_X))
+    receiver_diff <- player.payoff_receiver * (choice_X - (1 - choice_X))
     
-    # 収束チェック
-    if (!result$convergence) {
-      warning("最適化が収束しませんでした")
-      return(NULL)
-    }
+    base_utility <- dictator_diff
+    inequality_disutility <- alpha * s * receiver_diff + beta * r * receiver_diff
     
-    # ヘッセ行列のチェック
-    if (any(is.infinite(sqrt(diag(vcov(result)))))) {
-      warning("無限大の標準誤差が検出されました")
-      return(NULL)
-    }
-    
-    return(result)
-  }, error = function(e) {
-    warning(paste("推定エラー:", e$message))
-    return(NULL)
+    (base_utility + inequality_disutility) / 100  # スケーリング
   })
+  
+  # ロジット選択確率
+  prob <- 1 / (1 + exp(-lambda * utility_diff))
+  prob <- pmin(pmax(prob, .Machine$double.eps), 1 - .Machine$double.eps)
+  
+  # 対数尤度の計算
+  log_likelihood <- sum(data$choice_X * log(prob) + (1 - data$choice_X) * log(1 - prob), na.rm = TRUE)
+  
+  if (!is.finite(log_likelihood)) {
+    return(.Machine$double.xmax)
+  }
+  
+  return(-log_likelihood)
 }
 
-# 4. パラメータ推定の実行 ----
-# AI条件とコントロール条件それぞれで推定
-ai_estimates <- estimate_parameters(ai_processed)
-control_estimates <- estimate_parameters(control_processed)
-
-if (is.null(ai_estimates) || is.null(control_estimates)) {
-  stop("パラメータ推定に失敗しました")
-}
-
-# 結果の整理
-format_results <- function(estimates, condition) {
-  if (is.null(estimates)) return(NULL)
-  data.frame(
-    Condition = condition,
-    Parameter = c("α", "β"),
-    Estimate = coef(estimates),
-    SE = sqrt(diag(vcov(estimates))),
-    t_value = coef(estimates) / sqrt(diag(vcov(estimates)))
+# パラメータ推定関数の改善
+estimate_social_preferences <- function(data) {
+  # データの前処理
+  clean_data <- data %>%
+    filter(!is.na(choice_X),
+           !is.na(player.payoff_dictator),
+           !is.na(player.payoff_receiver)) %>%
+    group_by(participant.code) %>%
+    mutate(
+      round_normalized = scale(subsession.round_number),
+      payoff_diff = player.payoff_dictator - player.payoff_receiver,
+      payoff_sum = player.payoff_dictator + player.payoff_receiver,
+      payoff_ratio = player.payoff_dictator / player.payoff_receiver
+    ) %>%
+    ungroup()
+  
+  print(paste("前処理後の参加者数:", n_distinct(clean_data$participant.code)))
+  print(paste("前処理後の観測数:", nrow(clean_data)))
+  
+  if (nrow(clean_data) == 0) {
+    stop("有効なデータがありません")
+  }
+  
+  # 複数の初期値での推定
+  start_points <- list(
+    c(0.2, 0.2),
+    c(0.4, 0.4),
+    c(0.6, 0.6),
+    c(0.3, 0.5),
+    c(0.5, 0.3)
   )
-}
-
-ai_results <- format_results(ai_estimates, "AI")
-control_results <- format_results(control_estimates, "Control")
-results_table <- rbind(ai_results, control_results)
-
-# 結果の表示
-cat("\nパラメータ推定結果:\n")
-print(results_table)
-
-# 5. 仮説検定 ----
-# パラメータ差のブートストラップ信頼区間
-bootstrap_diff <- function(data1, data2, R = 1000) {
-  n1 <- nrow(data1)
-  n2 <- nrow(data2)
   
-  boot_results <- replicate(R, {
-    # リサンプリング
-    boot_data1 <- data1[sample(n1, replace = TRUE), ]
-    boot_data2 <- data2[sample(n2, replace = TRUE), ]
-    
-    # パラメータ推定
-    est1 <- estimate_parameters(boot_data1)
-    est2 <- estimate_parameters(boot_data2)
-    
-    if (is.null(est1) || is.null(est2)) return(c(NA, NA))
-    
-    # 差の計算
-    coef(est1) - coef(est2)
+  results <- lapply(start_points, function(start) {
+    tryCatch({
+      result <- optim(
+        par = start,
+        fn = likelihood_function,
+        data = clean_data,
+        method = "L-BFGS-B",
+        lower = c(0, 0),
+        upper = c(0.99, 0.99),  # 境界値を避ける
+        control = list(
+          maxit = 2000,
+          factr = 1e7,
+          pgtol = 1e-5
+        )
+      )
+      
+      if (result$convergence != 0) {
+        return(NULL)
+      }
+      
+      # 結果の妥当性チェック
+      if (!all(is.finite(result$par)) || 
+          any(result$par < 0) || 
+          any(result$par > 1)) {
+        return(NULL)
+      }
+      
+      return(result)
+    }, error = function(e) NULL)
   })
   
-  # NAを除外
-  boot_results <- boot_results[, !apply(boot_results, 2, function(x) any(is.na(x)))]
+  # 最良の結果を選択
+  valid_results <- results[!sapply(results, is.null)]
+  if (length(valid_results) == 0) {
+    warning("全ての最適化が失敗しました")
+    return(list(
+      par = c(NA, NA),
+      value = NA,
+      convergence = -1,
+      se = c(NA, NA)
+    ))
+  }
   
-  if (ncol(boot_results) < R * 0.5) {
-    warning("ブートストラップの50%以上が失敗しました")
+  values <- sapply(valid_results, function(x) x$value)
+  best_index <- which.min(values)
+  result <- valid_results[[best_index]]
+  
+  # ブートストラップによる信頼区間の計算
+  n_bootstrap <- 1000
+  bootstrap_params <- matrix(NA, nrow = n_bootstrap, ncol = 2)
+  
+  for (i in 1:n_bootstrap) {
+    bootstrap_participants <- sample(unique(clean_data$participant.code), 
+                                  replace = TRUE)
+    bootstrap_data <- clean_data %>%
+      filter(participant.code %in% bootstrap_participants)
+    
+    boot_result <- tryCatch({
+      optim(
+        par = result$par,
+        fn = likelihood_function,
+        data = bootstrap_data,
+        method = "L-BFGS-B",
+        lower = c(0, 0),
+        upper = c(0.99, 0.99),
+        control = list(
+          maxit = 1000,
+          factr = 1e7,
+          pgtol = 1e-5
+        )
+      )
+    }, error = function(e) NULL)
+    
+    if (!is.null(boot_result) && boot_result$convergence == 0) {
+      bootstrap_params[i,] <- boot_result$par
+    }
   }
   
   # 信頼区間の計算
-  t(apply(boot_results, 1, quantile, probs = c(0.025, 0.975), na.rm = TRUE))
+  ci <- apply(bootstrap_params, 2, quantile, probs = c(0.025, 0.975), na.rm = TRUE)
+  se <- apply(bootstrap_params, 2, sd, na.rm = TRUE)
+  
+  # 結果の拡張
+  result$se <- se
+  result$ci <- ci
+  return(result)
 }
 
-# 信頼区間の計算
-ci_results <- bootstrap_diff(ai_processed, control_processed)
-rownames(ci_results) <- c("α差", "β差")
-colnames(ci_results) <- c("2.5%", "97.5%")
-
-# 結果の表示
-cat("\nブートストラップ信頼区間:\n")
-print(ci_results)
-
-# 6. 感度分析 ----
-# 弾力性の計算
-calculate_elasticity <- function(estimates, data) {
-  if (is.null(estimates)) return(NULL)
-  params <- coef(estimates)
-  alpha <- params[1]
-  beta <- params[2]
-  
-  # α に関する弾力性
-  d_alpha <- with(data, {
-    s <- as.numeric(player.payoff_receiver > player.payoff_dictator)
-    mean(-s * player.payoff_dictator + s * player.payoff_receiver)
-  })
-  
-  # β に関する弾力性
-  d_beta <- with(data, {
-    r <- as.numeric(player.payoff_dictator > player.payoff_receiver)
-    mean(-r * player.payoff_dictator + r * player.payoff_receiver)
-  })
-  
-  return(c(alpha_elasticity = d_alpha, beta_elasticity = d_beta))
+# 条件ごとのパラメータ推定
+estimate_by_condition <- function(data) {
+  data %>%
+    group_by(condition) %>%
+    group_modify(~{
+      est <- estimate_social_preferences(.x)
+      tibble(
+        alpha = est$par[1],
+        beta = est$par[2],
+        alpha_se = est$se[1],
+        beta_se = est$se[2],
+        convergence = est$convergence,
+        log_likelihood = -est$value
+      )
+    })
 }
 
-# AI条件とコントロール条件の弾力性
-ai_elasticity <- calculate_elasticity(ai_estimates, ai_processed)
-control_elasticity <- calculate_elasticity(control_estimates, control_processed)
+# 結果の視覚化関数の改善
+plot_social_preferences <- function(results) {
+  # パラメータプロット
+  param_plot <- ggplot(results, aes(x = alpha, y = beta, color = condition)) +
+    geom_point(size = 3) +
+    geom_errorbar(aes(ymin = beta - beta_se, ymax = beta + beta_se), width = 0.05) +
+    geom_errorbarh(aes(xmin = alpha - alpha_se, xmax = alpha + alpha_se), height = 0.05) +
+    labs(
+      title = "社会的選好パラメータの推定結果",
+      x = "α (不利な不平等回避)",
+      y = "β (有利な不平等回避)",
+      color = "実験条件"
+    ) +
+    theme_minimal() +
+    theme(
+      text = element_text(family = "HiraKakuProN-W3"),
+      plot.title = element_text(size = 14, face = "bold"),
+      axis.title = element_text(size = 12),
+      legend.position = "bottom"
+    ) +
+    coord_cartesian(xlim = c(0, 1), ylim = c(0, 1)) +
+    geom_abline(intercept = 0, slope = 1, linetype = "dashed", alpha = 0.5)
+  
+  # 選択比率の分布プロット
+  choice_plot <- ggplot(data_all, aes(x = condition, y = choice_prop)) +
+    geom_boxplot(aes(fill = condition), alpha = 0.6) +
+    geom_jitter(width = 0.2, alpha = 0.4) +
+    labs(
+      title = "条件別の選択比率分布",
+      x = "実験条件",
+      y = "X選択の比率",
+      fill = "実験条件"
+    ) +
+    theme_minimal() +
+    theme(
+      text = element_text(family = "HiraKakuProN-W3"),
+      plot.title = element_text(size = 14, face = "bold"),
+      axis.title = element_text(size = 12),
+      legend.position = "bottom"
+    )
+  
+  # 時系列プロット
+  time_plot <- ggplot(data_all, aes(x = subsession.round_number, y = as.numeric(choice_X), color = condition)) +
+    stat_smooth(method = "loess", se = TRUE) +
+    labs(
+      title = "ラウンドごとの選択確率の推移",
+      x = "ラウンド",
+      y = "X選択の確率",
+      color = "実験条件"
+    ) +
+    theme_minimal() +
+    theme(
+      text = element_text(family = "HiraKakuProN-W3"),
+      plot.title = element_text(size = 14, face = "bold"),
+      axis.title = element_text(size = 12),
+      legend.position = "bottom"
+    )
+  
+  # プロットの保存
+  ggsave("analysis/social_preference_analysis/parameter_plot.png", param_plot, width = 8, height = 6)
+  ggsave("analysis/social_preference_analysis/choice_distribution.png", choice_plot, width = 8, height = 6)
+  ggsave("analysis/social_preference_analysis/time_series.png", time_plot, width = 8, height = 6)
+  
+  return(list(param_plot = param_plot, choice_plot = choice_plot, time_plot = time_plot))
+}
 
-if (!is.null(ai_elasticity) && !is.null(control_elasticity)) {
-  elasticity_table <- rbind(
-    data.frame(Condition = "AI", t(ai_elasticity)),
-    data.frame(Condition = "Control", t(control_elasticity))
+# 統計的検定
+conduct_statistical_tests <- function(data, results) {
+  # 参加者レベルのデータを作成
+  participant_data <- data %>%
+    group_by(participant.code, condition) %>%
+    summarise(
+      choice_prop = mean(choice_X, na.rm = TRUE),
+      total_rounds = n(),
+      .groups = "drop"
+    )
+  
+  # 条件間の選択比率の差の検定
+  choice_test <- wilcox.test(choice_prop ~ condition, data = participant_data)
+  
+  # 結果の出力
+  cat("\n=== 統計的検定結果 ===\n")
+  
+  cat("\n1. 記述統計:\n")
+  summary_stats <- participant_data %>%
+    group_by(condition) %>%
+    summarise(
+      n = n(),
+      mean_prop = mean(choice_prop),
+      sd_prop = sd(choice_prop),
+      median_prop = median(choice_prop),
+      .groups = "drop"
+    )
+  print(summary_stats)
+  
+  cat("\n2. 選択比率の条件間差 (Wilcoxon検定):\n")
+  print(choice_test)
+  
+  # 結果のまとめ
+  test_results <- list(
+    choice_test = choice_test,
+    summary_stats = summary_stats
   )
   
-  # 結果の表示
-  cat("\n弾力性分析結果:\n")
-  print(elasticity_table)
+  return(test_results)
 }
 
-# 7. 結果の解釈 ----
-# パラメータパターンの判定
-interpret_pattern <- function(ai_params, control_params) {
-  if (is.null(ai_params) || is.null(control_params)) return("推定失敗")
+# 結果の保存
+save_analysis_results <- function(results, test_results, file_path = "analysis/social_preference_analysis/analysis_results.md") {
+  sink(file_path)
   
-  alpha_diff <- ai_params[1] - control_params[1]
-  beta_diff <- ai_params[2] - control_params[2]
+  cat("# 社会的選好パラメータ分析結果\n\n")
   
-  pattern <- case_when(
-    alpha_diff > 0 & beta_diff > 0 ~ "普遍的利他性",
-    alpha_diff > 0 & abs(beta_diff) < 0.1 ~ "弱者保護指向",
-    abs(alpha_diff) < 0.1 & beta_diff > 0 ~ "効率性重視",
-    alpha_diff < 0 & beta_diff < 0 ~ "自己利益最大化",
-    TRUE ~ "その他"
-  )
+  cat("## 1. 記述統計\n\n")
+  print(test_results$summary_stats)
   
-  return(pattern)
+  cat("\n## 2. 統計的検定結果\n\n")
+  cat("### 2.1 選択比率の条件間差（Wilcoxon検定）\n")
+  print(test_results$choice_test)
+  
+  cat("\n## 3. 追加の分析\n\n")
+  cat("### 3.1 ラウンド効果\n")
+  # ラウンド効果の分析を追加
+  round_effects <- lmer(choice_X ~ condition + (1|participant.code) + (1|subsession.round_number), 
+                       data = data_all)
+  print(summary(round_effects))
+  
+  sink()
 }
 
-pattern <- interpret_pattern(
-  if (!is.null(ai_estimates)) coef(ai_estimates) else NULL,
-  if (!is.null(control_estimates)) coef(control_estimates) else NULL
-)
+# 時系列分析の追加
+analyze_time_trends <- function(data) {
+  # ラウンド効果のモデル
+  round_model <- lmer(choice_X ~ condition * scale(subsession.round_number) + 
+                       (1 + scale(subsession.round_number)|participant.code),
+                     data = data)
+  
+  # 選択の推移分析
+  choice_trends <- data %>%
+    group_by(condition, subsession.round_number) %>%
+    summarise(
+      choice_rate = mean(choice_X, na.rm = TRUE),
+      se = sd(choice_X, na.rm = TRUE) / sqrt(n()),
+      n = n(),
+      .groups = "drop"
+    )
+  
+  # 結果の出力
+  cat("\n=== 時系列分析結果 ===\n")
+  print(summary(round_model))
+  
+  # 時系列プロット
+  trend_plot <- ggplot(choice_trends, 
+                      aes(x = subsession.round_number, 
+                          y = choice_rate, 
+                          color = condition)) +
+    geom_line() +
+    geom_ribbon(aes(ymin = choice_rate - se, 
+                    ymax = choice_rate + se, 
+                    fill = condition), 
+                alpha = 0.2) +
+    labs(
+      title = "ラウンドごとの選択確率の推移",
+      x = "ラウンド",
+      y = "X選択の確率",
+      color = "実験条件",
+      fill = "実験条件"
+    ) +
+    theme_minimal() +
+    theme(
+      text = element_text(family = "HiraKakuProN-W3"),
+      plot.title = element_text(size = 14, face = "bold"),
+      axis.title = element_text(size = 12),
+      legend.position = "bottom"
+    )
+  
+  ggsave("analysis/social_preference_analysis/time_trends.png", trend_plot, width = 10, height = 6)
+  
+  return(list(
+    model = round_model,
+    trends = choice_trends,
+    plot = trend_plot
+  ))
+}
+
+# メイン実行部分
+results <- estimate_by_condition(data_all)
+plots <- plot_social_preferences(results)
+test_results <- conduct_statistical_tests(data_all, results)
+time_analysis <- analyze_time_trends(data_all)
+save_analysis_results(results, test_results)
 
 # 結果の表示
-cat("\n解釈されたパターン:", pattern, "\n")
+print("=== 分析結果 ===")
+print(results)
+print("\n=== 時系列分析 ===")
+print(summary(time_analysis$model))
 
-# 8. 診断チェック ----
-# ヘッセ行列の正定値性チェック
-check_hessian <- function(estimates) {
-  if (is.null(estimates)) return(NA)
-  tryCatch({
-    eigen_values <- eigen(estimates$hessian)$values
-    all(eigen_values < 0)  # 最大化問題なので負定値であることを確認
-  }, error = function(e) {
-    warning(paste("ヘッセ行列チェックエラー:", e$message))
-    return(NA)
-  })
-}
+# 追加の可視化：ラウンドごとの選択パターン
+round_pattern_plot <- ggplot(data_all, aes(x = subsession.round_number, fill = condition)) +
+  geom_bar(position = "dodge") +
+  facet_wrap(~condition) +
+  labs(
+    title = "ラウンドごとの選択パターン",
+    x = "ラウンド",
+    y = "選択回数",
+    fill = "実験条件"
+  ) +
+  theme_minimal() +
+  theme(
+    text = element_text(family = "HiraKakuProN-W3"),
+    plot.title = element_text(size = 14, face = "bold"),
+    axis.title = element_text(size = 12),
+    legend.position = "bottom"
+  )
 
-# 診断結果の表示
-ai_hessian_check <- check_hessian(ai_estimates)
-control_hessian_check <- check_hessian(control_estimates)
-
-diagnostic_results <- data.frame(
-  Condition = c("AI", "Control"),
-  Hessian_Check = c(ai_hessian_check, control_hessian_check)
-)
-
-cat("\n診断チェック結果:\n")
-print(diagnostic_results)
-
-# 9. 結果の保存 ----
-# 結果をRDSファイルとして保存
-results_list <- list(
-  parameter_estimates = results_table,
-  confidence_intervals = ci_results,
-  elasticity = if (exists("elasticity_table")) elasticity_table else NULL,
-  pattern = pattern,
-  diagnostics = diagnostic_results
-)
-
-saveRDS(results_list, "social_preference_results.rds")
-
-# CSVファイルとしても保存
-write.csv(results_table, "parameter_estimates.csv", row.names = FALSE)
-write.csv(ci_results, "confidence_intervals.csv")
-if (exists("elasticity_table")) {
-  write.csv(elasticity_table, "elasticity_results.csv", row.names = FALSE)
-}
-write.csv(diagnostic_results, "diagnostic_results.csv", row.names = FALSE) 
+ggsave("analysis/social_preference_analysis/round_pattern.png", round_pattern_plot, width = 10, height = 6)
