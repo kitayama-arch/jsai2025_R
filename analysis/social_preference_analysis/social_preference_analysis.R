@@ -447,33 +447,33 @@ results_df_restricted <- tibble(
 results_df <- bind_rows(results_df, results_df_restricted)
 
 # 結果の表示
-cat("\n=== 条件間の社会的選好パラメータ比較 ===\n\n")
-
-# 各条件のパラメータ推定値と95%信頼区間
-cat("1. 条件ごとのパラメータ推定値（95%信頼区間）:\n\n")
+  cat("\n=== 条件間の社会的選好パラメータ比較 ===\n\n")
+  
+  # 各条件のパラメータ推定値と95%信頼区間
+  cat("1. 条件ごとのパラメータ推定値（95%信頼区間）:\n\n")
 
 for (sample in c("All", "Restricted")) {
   cat(sprintf("\n%sサンプル:\n", sample))
-  for (cond in c("AI", "Control")) {
+for (cond in c("AI", "Control")) {
     cat(sprintf("\n%s条件:\n", cond))
     cond_data <- results_df %>% 
       filter(condition == cond, sample_type == sample)
-    
-    if (!any(is.na(cond_data[, c("alpha", "beta", "lambda")]))) {
+  
+  if (!any(is.na(cond_data[, c("alpha", "beta", "lambda")]))) {
       cat(sprintf("α (不利な不平等回避) = %.3f (%.3f, %.3f)\n", 
-                 cond_data$alpha,
-                 cond_data$alpha - 1.96 * cond_data$alpha_se,
-                 cond_data$alpha + 1.96 * cond_data$alpha_se))
-      
+               cond_data$alpha,
+               cond_data$alpha - 1.96 * cond_data$alpha_se,
+               cond_data$alpha + 1.96 * cond_data$alpha_se))
+    
       cat(sprintf("β (有利な不平等回避) = %.3f (%.3f, %.3f)\n", 
-                 cond_data$beta,
-                 cond_data$beta - 1.96 * cond_data$beta_se,
-                 cond_data$beta + 1.96 * cond_data$beta_se))
-      
+               cond_data$beta,
+               cond_data$beta - 1.96 * cond_data$beta_se,
+               cond_data$beta + 1.96 * cond_data$beta_se))
+    
       cat(sprintf("λ (選択の感度) = %.3f (%.3f, %.3f)\n", 
-                 cond_data$lambda,
-                 cond_data$lambda - 1.96 * cond_data$lambda_se,
-                 cond_data$lambda + 1.96 * cond_data$lambda_se))
+               cond_data$lambda,
+               cond_data$lambda - 1.96 * cond_data$lambda_se,
+               cond_data$lambda + 1.96 * cond_data$lambda_se))
     } else {
       cat("パラメータの推定に失敗しました\n")
     }
@@ -494,12 +494,12 @@ plot_bootstrap_results <- function(ai_results, control_results, ai_results_restr
                    group_by(participant.code, position) %>%
                    summarise(selfish_rate = mean(is_selfish_choice, na.rm = TRUE), .groups = "drop"),
                  aes(x = position, y = selfish_rate, fill = "Control")) +
-    scale_fill_manual(values = c("AI" = "#FF9999", "Control" = "#99CC99")) +
+      scale_fill_manual(values = c("AI" = "#FF9999", "Control" = "#99CC99")) +
     labs(title = "立場ごとのSelfish選択率",
          x = "Position",
          y = "Selfish選択率",
          fill = "条件") +
-    theme_minimal() +
+      theme_minimal() +
     theme(text = element_text(family = "HiraKakuProN-W3"))
   
   # 立場ごとの選択率の時系列プロット
