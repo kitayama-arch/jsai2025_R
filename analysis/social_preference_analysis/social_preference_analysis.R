@@ -536,7 +536,7 @@ plot_bootstrap_results <- function(ai_results, control_results) {
     geom_point(alpha = 0.1) +
     geom_density2d() +
     labs(title = "パラメータ間の関係 (Control条件)") +
-    theme_minimal() +
+  theme_minimal() +
     theme(text = element_text(family = "HiraKakuProN-W3")) +
     scale_color_manual(values = c("Control" = "#009900"))
   

@@ -15,7 +15,7 @@ output:
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(
-  echo = FALSE,
+  echo = TRUE,
   message = FALSE,
   warning = FALSE,
   fig.width = 10,
@@ -28,10 +28,10 @@ knitr::opts_knit$set(root.dir = normalizePath("../../"))
 
 この分析では、AI条件とControl条件における社会的選好パラメータの推定と比較を行います。
 
-## データの準備
+## データの準備と前処理
 
-```{r packages_and_data, message=FALSE, warning=FALSE}
-# 必要なパッケージの読み込み
+```{r packages_and_data}
+# 必要なパッケージの読み込みと前処理
 library(tidyverse)
 library(stats)
 library(lme4)
@@ -45,9 +45,7 @@ library(knitr)
 select <- dplyr::select
 filter <- dplyr::filter
 some <- purrr::some
-```
 
-```{r}
 # エラーハンドリング関数
 handle_data_loading <- function(file_path) {
   tryCatch({
@@ -606,7 +604,7 @@ plot_bootstrap_results(ai_results, control_results)
 
 ### 1. 条件ごとのパラメータ推定値
 
-```{r results_table}
+```{r parameter_estimates}
 knitr::kable(results_df, 
              caption = "条件ごとの推定パラメータと標準誤差",
              digits = 3,
@@ -700,7 +698,29 @@ gridExtra::grid.arrange(scatter_ai, scatter_control, ncol = 2)
 ### 4. 統計的検定結果
 
 ```{r statistical_tests}
-# 条件間の差の検定結果をテーブルとして表示
+# 条件間の差の計算と検定
+if (!any(is.na(results_df[, c("alpha", "beta", "lambda")]))) {
+  ai_data <- results_df %>% filter(condition == "AI")
+  control_data <- results_df %>% filter(condition == "Control")
+  
+  # 差の計算と表示
+  cat("\n2. 条件間の差（AI - Control）:\n")
+  cat(sprintf("Δα = %.3f\n", delta_alpha))
+  cat(sprintf("Δβ = %.3f\n", delta_beta))
+  cat(sprintf("Δλ = %.3f\n", delta_lambda))
+  
+  cat("\n3. 統計的検定（z検定）:\n")
+  cat(sprintf("α: z = %.3f, p = %.3f\n", z_alpha, p_alpha))
+  cat(sprintf("β: z = %.3f, p = %.3f\n", z_beta, p_beta))
+  cat(sprintf("λ: z = %.3f, p = %.3f\n", z_lambda, p_lambda))
+  
+  cat("\n4. 効果量（Cohen's d）:\n")
+  cat(sprintf("α: d = %.3f\n", d_alpha))
+  cat(sprintf("β: d = %.3f\n", d_beta))
+  cat(sprintf("λ: d = %.3f\n", d_lambda))
+}
+
+# 検定結果の表
 test_results <- tibble(
   Parameter = c("α (不利な不平等回避)", "β (有利な不平等回避)", "λ (選択の感度)"),
   Difference = c(delta_alpha, delta_beta, delta_lambda),
