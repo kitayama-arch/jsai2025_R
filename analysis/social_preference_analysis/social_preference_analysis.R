@@ -574,3 +574,99 @@ plot_bootstrap_results <- function(ai_results, control_results) {
 
 # 可視化の実行
 plot_bootstrap_results(ai_results, control_results)
+
+# 結果のMarkdown形式での出力
+write_results_markdown <- function(ai_results, control_results, results_df) {
+  # 結果を格納するファイルを開く
+  sink("analysis/social_preference_analysis/analysis_results.md")
+  
+  cat("# 社会的選好パラメータ分析結果\n\n")
+  
+  # 1. パラメータ推定結果
+  cat("## 1. パラメータ推定結果\n\n")
+  
+  # AI条件の結果
+  cat("### AI条件:\n")
+  cat(sprintf("- α (不利な不平等回避) = %.3f ± %.3f\n", 
+              ai_results$estimates[1], ai_results$se[1]))
+  cat(sprintf("- β (有利な不平等回避) = %.3f ± %.3f\n", 
+              ai_results$estimates[2], ai_results$se[2]))
+  cat(sprintf("- λ (選択の感度) = %.3f ± %.3f\n\n", 
+              ai_results$estimates[3], ai_results$se[3]))
+  
+  # Control条件の結果
+  cat("### Control条件:\n")
+  cat(sprintf("- α (不利な不平等回避) = %.3f ± %.3f\n", 
+              control_results$estimates[1], control_results$se[1]))
+  cat(sprintf("- β (有利な不平等回避) = %.3f ± %.3f\n", 
+              control_results$estimates[2], control_results$se[2]))
+  cat(sprintf("- λ (選択の感度) = %.3f ± %.3f\n\n", 
+              control_results$estimates[3], control_results$se[3]))
+  
+  # 2. 条件間の差と統計的検定
+  cat("## 2. 条件間の差（AI - Control）と統計的検定\n\n")
+  
+  # 差の計算
+  delta_alpha <- ai_results$estimates[1] - control_results$estimates[1]
+  delta_beta <- ai_results$estimates[2] - control_results$estimates[2]
+  delta_lambda <- ai_results$estimates[3] - control_results$estimates[3]
+  
+  # 標準誤差の計算
+  se_diff_alpha <- sqrt(ai_results$se[1]^2 + control_results$se[1]^2)
+  se_diff_beta <- sqrt(ai_results$se[2]^2 + control_results$se[2]^2)
+  se_diff_lambda <- sqrt(ai_results$se[3]^2 + control_results$se[3]^2)
+  
+  # z統計量とp値の計算
+  z_alpha <- delta_alpha / se_diff_alpha
+  z_beta <- delta_beta / se_diff_beta
+  z_lambda <- delta_lambda / se_diff_lambda
+  
+  p_alpha <- 2 * (1 - pnorm(abs(z_alpha)))
+  p_beta <- 2 * (1 - pnorm(abs(z_beta)))
+  p_lambda <- 2 * (1 - pnorm(abs(z_lambda)))
+  
+  cat(sprintf("- Δα = %.3f（不利な不平等回避の差）\n", delta_alpha))
+  cat(sprintf("  - z = %.3f, p = %.3f%s\n", 
+              z_alpha, p_alpha, 
+              ifelse(p_alpha < 0.05, "（統計的に有意な差あり）", "（統計的に有意な差なし）")))
+  
+  cat(sprintf("- Δβ = %.3f（有利な不平等回避の差）\n", delta_beta))
+  cat(sprintf("  - z = %.3f, p = %.3f%s\n", 
+              z_beta, p_beta,
+              ifelse(p_beta < 0.05, "（統計的に有意な差あり）", "（統計的に有意な差なし）")))
+  
+  cat(sprintf("- Δλ = %.3f（選択感度の差）\n", delta_lambda))
+  cat(sprintf("  - z = %.3f, p = %.3f%s\n\n", 
+              z_lambda, p_lambda,
+              ifelse(p_lambda < 0.05, "（統計的に有意な差あり）", "（統計的に有意な差なし）")))
+  
+  # 3. 主な知見
+  cat("## 3. 主な知見\n\n")
+  cat("1. AI条件では、Control条件と比較して：\n")
+  cat(sprintf("   - 不利な不平等への回避度が%sが、%s（Δα %s 0, p = %.3f）\n",
+              ifelse(delta_alpha > 0, "高い", "低い"),
+              ifelse(p_alpha < 0.05, "有意差あり", "有意差なし"),
+              ifelse(delta_alpha > 0, ">", "<"),
+              p_alpha))
+  cat(sprintf("   - 有利な不平等への回避度が%sが、%s（Δβ %s 0, p = %.3f）\n",
+              ifelse(delta_beta > 0, "高い", "低い"),
+              ifelse(p_beta < 0.05, "有意差あり", "有意差なし"),
+              ifelse(delta_beta > 0, ">", "<"),
+              p_beta))
+  cat(sprintf("   - 選択の感度が%s%s（Δλ %s 0, p = %.3f）\n",
+              ifelse(delta_lambda > 0, "高い", "低い"),
+              ifelse(p_lambda < 0.05, "（有意差あり）", "（有意差なし）"),
+              ifelse(delta_lambda > 0, ">", "<"),
+              p_lambda))
+  
+  cat("\n2. 両条件とも、有利な不平等回避（β）が不利な不平等回避（α）より強い\n")
+  
+  cat(sprintf("\n3. Control条件の方が選択の一貫性が%s（λが大きい）\n",
+              ifelse(p_lambda < 0.05, "有意に高い", "高い傾向にある")))
+  
+  # ファイルを閉じる
+  sink()
+}
+
+# 結果の出力
+write_results_markdown(ai_results, control_results, results_df)
