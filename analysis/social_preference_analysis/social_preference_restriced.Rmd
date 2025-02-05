@@ -1,0 +1,578 @@
+---
+title: "社会的選好分析（Restricted Sample）"
+author: "Taito Hirano"
+date: "`r format(Sys.time(), '%Y年%m月%d日')`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: united
+    highlight: tango
+    df_print: paged
+    fig_width: 10
+    fig_height: 7
+    code_folding: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  fig.width = 10,
+  fig.height = 7
+)
+knitr::opts_knit$set(root.dir = normalizePath("../../"))
+```
+
+## 1. データの準備と前処理
+
+```{r packages_and_data}
+# 必要なパッケージの読み込み
+library(tidyverse)
+library(stats)
+library(lme4)
+library(car)
+library(emmeans)
+library(optimx)
+library(gridExtra)
+library(knitr)
+
+# パッケージの競合を解決
+select <- dplyr::select
+filter <- dplyr::filter
+some <- purrr::some
+
+# エラーハンドリング関数
+handle_data_loading <- function(file_path) {
+  tryCatch({
+    data <- read_csv(file_path)
+    if (nrow(data) == 0) {
+      stop("データが空です: ", file_path)
+    }
+    return(data)
+  }, error = function(e) {
+    stop("データの読み込みエラー: ", file_path, "\n", e$message)
+  })
+}
+
+# データの読み込み
+# 選択肢データの読み込み
+payoff_scenarios <- handle_data_loading("Experiment/payoff_scenarios_analysis.csv") %>%
+  mutate(
+    # Klockmann et al. (2023)の分類に基づく
+    position = Category_2_Position,
+    is_selfish = Category_1_Slope == "Selfish",
+    should_include = !Category_1_Slope %in% c("Receiver indiff.", "Dictator indiff.") &
+                    !str_detect(Category_1_Slope, "Pareto"),
+    # 新しい分類基準
+    klockmann_restricted = is_selfish & should_include
+  )
+
+# AI条件の独裁者ゲームデータ
+data_0117_3 <- handle_data_loading("AI2025_data/20250117_3/dictator_app_2025-01-17.csv")
+data_0120_5 <- handle_data_loading("AI2025_data/20250120_5/dictator_app_2025-01-20.csv")
+# コントロール条件の独裁者ゲームデータ
+data_0117_4 <- handle_data_loading("AI2025_data/20250117_4/Base_dictator_app_2025-01-17.csv")
+data_0120_4 <- handle_data_loading("AI2025_data/20250120_4/Base_dictator_app_2025-01-20.csv")
+
+# データクリーニングと前処理
+clean_dictator_data <- function(data, is_control = FALSE) {
+  cleaned_data <- data %>%
+    filter(participant.visited == 1) %>%
+    filter(!is.na(player.payoff_dictator),
+           !is.na(player.payoff_receiver),
+           player.payoff_dictator > 0,
+           player.payoff_receiver > 0)
+  
+  if (is_control) {
+    cleaned_data <- cleaned_data %>%
+      filter(subsession.round_number != 16)
+  }
+  
+  # 選択しなかった方の選択肢データを追加
+  cleaned_data <- cleaned_data %>%
+    left_join(
+      payoff_scenarios %>% 
+        filter(Is_Training == TRUE) %>%
+        select(
+          Game,
+          Option_X_Dictator, Option_X_Receiver,
+          Option_Y_Dictator, Option_Y_Receiver,
+          position, is_selfish, should_include, klockmann_restricted
+        ),
+      by = c("subsession.round_number" = "Game")
+    ) %>%
+    mutate(
+      # 選択しなかった方の選択肢のデータを設定
+      non_chosen_payoff_dictator = case_when(
+        player.choice == "X" ~ Option_Y_Dictator,
+        player.choice == "Y" ~ Option_X_Dictator
+      ),
+      non_chosen_payoff_receiver = case_when(
+        player.choice == "X" ~ Option_Y_Receiver,
+        player.choice == "Y" ~ Option_X_Receiver
+      ),
+      # Klockmann et al. (2023)の定義に基づくSelfish選択の判定
+      is_selfish_choice = case_when(
+        player.choice == "X" & Option_X_Dictator > Option_Y_Dictator ~ TRUE,
+        player.choice == "Y" & Option_Y_Dictator > Option_X_Dictator ~ TRUE,
+        TRUE ~ FALSE
+      )
+    )
+  
+  return(cleaned_data)
+}
+
+# データのクリーニング
+data_0117_3_clean <- clean_dictator_data(data_0117_3)
+data_0120_5_clean <- clean_dictator_data(data_0120_5)
+data_0117_4_clean <- clean_dictator_data(data_0117_4, is_control = TRUE)
+data_0120_4_clean <- clean_dictator_data(data_0120_4, is_control = TRUE)
+
+# データの統合と変数作成
+create_analysis_dataset <- function(data, condition) {
+  processed_data <- data %>%
+    mutate(
+      condition = condition,
+      s = as.integer(player.payoff_receiver > player.payoff_dictator),
+      r = as.integer(player.payoff_dictator > player.payoff_receiver),
+      total_payoff = player.payoff_dictator + player.payoff_receiver,
+      diff_payoff = player.payoff_dictator - player.payoff_receiver,
+      choice_X = case_when(
+        player.choice == "X" ~ TRUE,
+        player.choice == "Y" ~ FALSE,
+        TRUE ~ NA
+      )
+    ) %>%
+    group_by(participant.code) %>%
+    mutate(
+      total_rounds = n(),
+      # 立場ごとのSelfish選択率を計算
+      selfish_rate_advantageous = mean(is_selfish_choice[position == "Advantageous"], na.rm = TRUE),
+      selfish_rate_mixed = mean(is_selfish_choice[position == "Mixed"], na.rm = TRUE),
+      selfish_rate_disadvantageous = mean(is_selfish_choice[position == "Disadvantageous"], na.rm = TRUE)
+    ) %>%
+    ungroup() %>%
+    filter(total_rounds >= 10)  # 最低10ラウンド以上のデータを持つ参加者のみ
+  
+  return(processed_data)
+}
+```
+
+## 2. 記述統計
+
+### 2.1 基本統計量
+
+```{r descriptive_stats}
+# AI条件とコントロール条件のデータ統合
+data_ai <- bind_rows(
+  create_analysis_dataset(data_0117_3_clean, "AI"),
+  create_analysis_dataset(data_0120_5_clean, "AI")
+)
+
+data_control <- bind_rows(
+  create_analysis_dataset(data_0117_4_clean, "Control"),
+  create_analysis_dataset(data_0120_4_clean, "Control")
+)
+
+data_all <- bind_rows(data_ai, data_control)
+
+# 条件ごとの参加者数とラウンド数の確認
+participant_summary <- data_all %>%
+  group_by(condition) %>%
+  summarise(
+    n_participants = n_distinct(participant.code),
+    total_rounds = n(),
+    avg_rounds_per_participant = total_rounds / n_participants
+  )
+
+knitr::kable(participant_summary,
+             caption = "参加者とラウンドの要約",
+             digits = 2,
+             col.names = c("条件", "参加者数", "総ラウンド数", "平均ラウンド数"))
+
+# 選択の分布確認
+choice_summary <- data_all %>%
+  group_by(condition) %>%
+  summarise(
+    n_choices = n(),
+    prop_X = mean(choice_X, na.rm = TRUE),
+    sd_X = sd(choice_X, na.rm = TRUE)
+  )
+
+knitr::kable(choice_summary,
+             caption = "選択の分布",
+             digits = 3,
+             col.names = c("条件", "選択数", "選択X比率", "選択Xの標準偏差"))
+```
+
+## 3. 社会的選好パラメータの推定
+
+### 3.1 推定方法
+
+```{r utility_function}
+# 社会的選好パラメータの推定のための尤度関数
+likelihood_function <- function(params, data) {
+  alpha <- params[1]  # 不利な不平等に対する回避度
+  beta <- params[2]   # 有利な不平等に対する回避度
+  lambda <- params[3] # 選択の感度パラメータ
+  
+  # 最大金額の計算
+  max_payoff <- max(c(data$Option_X_Dictator, data$Option_X_Receiver,
+                      data$Option_Y_Dictator, data$Option_Y_Receiver))
+  
+  # 効用関数の計算（Bruhin et al. 2019の定式化に基づく）
+  utility_X <- with(data, {
+    # 不平等指標の計算
+    s <- as.integer(Option_X_Receiver > Option_X_Dictator)
+    r <- as.integer(Option_X_Dictator > Option_X_Receiver)
+    
+    # 効用関数: u_D(π_D, π_R) = (1 - αs - βr)π_D + (αs + βr)π_R
+    (1 - alpha * s - beta * r) * Option_X_Dictator / max_payoff + 
+    (alpha * s + beta * r) * Option_X_Receiver / max_payoff
+  })
+
+  utility_Y <- with(data, {
+    # 不平等指標の計算（選択Yの場合）
+    s <- as.integer(Option_Y_Receiver > Option_Y_Dictator)
+    r <- as.integer(Option_Y_Dictator > Option_Y_Receiver)
+    
+    # 効用関数: u_D(π_D, π_R) = (1 - αs - βr)π_D + (αs + βr)π_R
+    (1 - alpha * s - beta * r) * Option_Y_Dictator / max_payoff + 
+    (alpha * s + beta * r) * Option_Y_Receiver / max_payoff
+  })
+  
+  # 効用差の計算
+  utility_diff <- utility_X - utility_Y
+  
+  # ロジット選択確率の計算
+  prob <- 1 / (1 + exp(-lambda * utility_diff))
+  
+  # 数値的安定性のための調整
+  prob <- pmin(pmax(prob, .Machine$double.eps), 1 - .Machine$double.eps)
+  
+  # 対数尤度の計算
+  log_likelihood <- sum(data$choice_X * log(prob) + (1 - data$choice_X) * log(1 - prob), na.rm = TRUE)
+  
+  # 無限大や非数値をチェック
+  if (!is.finite(log_likelihood)) {
+    return(.Machine$double.xmax)
+  }
+  
+  return(-log_likelihood)
+}
+
+# パラメータ推定関数
+estimate_parameters <- function(clean_data) {
+  # グリッドサーチのパラメータ定義
+  alpha_grid <- seq(-0.5, 0.5, by = 0.1)
+  beta_grid <- seq(-0.5, 0.5, by = 0.1)
+  lambda_grid <- seq(0.1, 15.0, by = 1.0)
+  
+  # グリッドサーチによる初期値の探索
+  grid_results <- expand.grid(alpha = alpha_grid, beta = beta_grid, lambda = lambda_grid)
+  grid_results$value <- apply(grid_results, 1, function(params) {
+    tryCatch({
+      likelihood_function(params, clean_data)
+    }, error = function(e) Inf)
+  })
+  
+  # 最良の初期値を選択
+  best_start <- unlist(grid_results[which.min(grid_results$value), 1:3])
+  
+  # 最適化の実行
+  result <- optim(
+    par = best_start,
+    fn = likelihood_function,
+    data = clean_data,
+    method = "L-BFGS-B",
+    lower = c(-0.5, -0.5, 0.1),
+    upper = c(0.5, 0.5, 15.0),
+    control = list(maxit = 1000),
+    hessian = TRUE
+  )
+  
+  # ブートストラップによる標準誤差の推定
+  bootstrap_results <- bootstrap_estimates(clean_data, alpha_grid, beta_grid, lambda_grid)
+  
+  list(
+    estimates = result$par,
+    se = bootstrap_results$se,
+    convergence = result$convergence,
+    log_likelihood = -result$value,
+    bootstrap_results = bootstrap_results
+  )
+}
+
+# ブートストラップによる標準誤差の推定
+bootstrap_estimates <- function(clean_data, alpha_grid, beta_grid, lambda_grid, n_bootstrap = 100) {
+  # 参加者のユニークIDを取得
+  unique_participants <- unique(clean_data$participant.code)
+  
+  # ブートストラップサンプルの生成と推定
+  bootstrap_results <- matrix(NA, nrow = 3, ncol = n_bootstrap)
+  
+  for (i in 1:n_bootstrap) {
+    # 参加者レベルでリサンプリング
+    sampled_participants <- sample(unique_participants, replace = TRUE)
+    
+    # 選択された参加者のデータを結合
+    bootstrap_data <- do.call(rbind, lapply(sampled_participants, function(p) {
+      clean_data[clean_data$participant.code == p, ]
+    }))
+    
+    # グリッドサーチの実行
+    grid_results <- expand.grid(alpha = alpha_grid, beta = beta_grid, lambda = lambda_grid)
+    grid_results$value <- apply(grid_results, 1, function(params) {
+      tryCatch({
+        likelihood_function(params, bootstrap_data)
+      }, error = function(e) Inf)
+    })
+    
+    # 最良の初期値を選択
+    best_start <- unlist(grid_results[which.min(grid_results$value), 1:3])
+    
+    # 最適化の実行
+    result <- tryCatch({
+      optim(
+        par = best_start,
+        fn = likelihood_function,
+        data = bootstrap_data,
+        method = "L-BFGS-B",
+        lower = c(-0.5, -0.5, 0.1),
+        upper = c(0.5, 0.5, 15.0),
+        control = list(maxit = 1000),
+        hessian = TRUE
+      )
+    }, error = function(e) NULL)
+    
+    if (!is.null(result) && result$convergence == 0) {
+      bootstrap_results[, i] <- result$par
+    }
+  }
+  
+  # 結果の要約
+  bootstrap_mean <- rowMeans(bootstrap_results, na.rm = TRUE)
+  bootstrap_se <- apply(bootstrap_results, 1, sd, na.rm = TRUE)
+  
+  list(
+    estimates = bootstrap_mean,
+    se = bootstrap_se,
+    raw_results = bootstrap_results
+  )
+}
+```
+
+### 3.2 パラメータ推定の実行
+
+```{r parameter_estimation_base}
+# データの準備
+data_ai_restricted <- data_ai %>% 
+  filter(klockmann_restricted == TRUE)
+data_control_restricted <- data_control %>% 
+  filter(klockmann_restricted == TRUE)
+
+# 全サンプルでの分析実行
+ai_results <- estimate_parameters(data_ai)
+control_results <- estimate_parameters(data_control)
+
+# Restricted sampleでの分析実行
+ai_results_restricted <- estimate_parameters(data_ai_restricted)
+control_results_restricted <- estimate_parameters(data_control_restricted)
+```
+
+通常の最尤推定では、コントロール条件の標準誤差がほぼ0と推定されたので、ブートストラップ法を用いて推定しました。  
+最初は1000回やってましたが、100回でもほぼ同じ結果が得られたので、100回で実行してます。  
+なにか問題があれば教えていただけると助かります。  
+
+また、先行研究に基づき、独裁者と受け手の間で利害が明確に対立する  
+1. 独裁者がXを選ぶと自分の利得が厳密に高くなり  
+2. 受け手はYを選ぶと自分の利得が厳密に高くなる  
+これらの選択肢をRestricted sampleとして別途分析しました。  
+この場合のみ有意になった結果がありました。  
+
+```{r parameter_estimation_results}
+# 結果のデータフレーム作成
+results_df <- bind_rows(
+  tibble(
+    condition = c("AI", "Control"),
+    sample_type = "All",
+    alpha = c(ai_results$estimates[1], control_results$estimates[1]),
+    beta = c(ai_results$estimates[2], control_results$estimates[2]),
+    lambda = c(ai_results$estimates[3], control_results$estimates[3]),
+    alpha_se = c(ai_results$se[1], control_results$se[1]),
+    beta_se = c(ai_results$se[2], control_results$se[2]),
+    lambda_se = c(ai_results$se[3], control_results$se[3]),
+    convergence = c(ai_results$convergence, control_results$convergence),
+    log_likelihood = c(ai_results$log_likelihood, control_results$log_likelihood)
+  ),
+  tibble(
+    condition = c("AI", "Control"),
+    sample_type = "Restricted",
+    alpha = c(ai_results_restricted$estimates[1], control_results_restricted$estimates[1]),
+    beta = c(ai_results_restricted$estimates[2], control_results_restricted$estimates[2]),
+    lambda = c(ai_results_restricted$estimates[3], control_results_restricted$estimates[3]),
+    alpha_se = c(ai_results_restricted$se[1], control_results_restricted$se[1]),
+    beta_se = c(ai_results_restricted$se[2], control_results_restricted$se[2]),
+    lambda_se = c(ai_results_restricted$se[3], control_results_restricted$se[3]),
+    convergence = c(ai_results_restricted$convergence, control_results_restricted$convergence),
+    log_likelihood = c(ai_results_restricted$log_likelihood, control_results_restricted$log_likelihood)
+  )
+)
+
+# パラメータ推定結果の表示
+knitr::kable(results_df, 
+             caption = "条件ごとの推定パラメータと標準誤差（ブートストラップ推定）",
+             digits = 3,
+             col.names = c("条件", "サンプル", "α", "β", "λ", "α_SE", "β_SE", "λ_SE", "収束", "対数尤度"))
+```
+
+### 3.3 パラメータの分布
+
+```{r parameter_plots}
+# ブートストラップ結果からデータフレームを作成
+prepare_bootstrap_data <- function(results, condition) {
+  data.frame(
+    condition = condition,
+    alpha = results$bootstrap_results$raw_results[1,],
+    beta = results$bootstrap_results$raw_results[2,],
+    lambda = results$bootstrap_results$raw_results[3,]
+  )
+}
+
+# 各条件のデータを準備
+data_ai_full <- prepare_bootstrap_data(ai_results, "AI (All)")
+data_control_full <- prepare_bootstrap_data(control_results, "Control (All)")
+data_ai_restricted <- prepare_bootstrap_data(ai_results_restricted, "AI (Restricted)")
+data_control_restricted <- prepare_bootstrap_data(control_results_restricted, "Control (Restricted)")
+
+# すべてのデータを結合
+plot_data <- bind_rows(
+  data_ai_full,
+  data_control_full,
+  data_ai_restricted,
+  data_control_restricted
+) %>%
+  mutate(condition = factor(condition, 
+                           levels = c("AI (Restricted)", "AI (All)", 
+                                    "Control (Restricted)", "Control (All)")))
+
+# カラーパレットの設定
+color_palette <- c(
+  "AI (Restricted)" = "#FF0000",      # 濃い赤
+  "AI (All)" = "#FF9999",            # 薄い赤
+  "Control (Restricted)" = "#0000FF", # 濃い青
+  "Control (All)" = "#9999FF"        # 薄い青
+)
+
+# 共通のテーマ設定
+plot_theme <- theme_minimal() +
+  theme(
+    text = element_text(family = "HiraKakuProN-W3"),
+    plot.title = element_text(size = 12),
+    axis.title = element_text(size = 10),
+    legend.title = element_text(size = 10),
+    legend.text = element_text(size = 9)
+  )
+
+# 密度プロットの生成
+density_plot_alpha <- ggplot(plot_data, aes(x = alpha, fill = condition)) +
+  geom_density(alpha = 0.7) +
+  scale_fill_manual(values = color_palette) +
+  labs(title = "不利な不平等に対する回避度 (α)",
+       x = "α",
+       y = "密度") +
+  plot_theme +
+  theme(legend.position = "none")
+
+density_plot_beta <- ggplot(plot_data, aes(x = beta, fill = condition)) +
+  geom_density(alpha = 0.7) +
+  scale_fill_manual(values = color_palette) +
+  labs(title = "有利な不平等に対する回避度 (β)",
+       x = "β",
+       y = "密度",
+       fill = "条件") +
+  plot_theme +
+  theme(legend.position = "bottom")
+
+density_plot_lambda <- ggplot(plot_data, aes(x = lambda, fill = condition)) +
+  geom_density(alpha = 0.7) +
+  scale_fill_manual(values = color_palette) +
+  labs(title = "選択の感度パラメータ (λ)",
+       x = "λ",
+       y = "密度") +
+  plot_theme +
+  theme(legend.position = "none")
+
+# グラフの配置
+grid.arrange(
+  density_plot_alpha, density_plot_beta, density_plot_lambda,
+  ncol = 3,
+  widths = c(1, 1, 1)
+)
+```
+
+## 4. 統計的検定
+
+```{r statistical_tests}
+# 検定結果の表を作成
+test_results <- tibble(
+  Sample = rep(c("All", "Restricted"), each = 3),
+  Parameter = rep(c("α (不利な不平等回避)", "β (有利な不平等回避)", "λ (選択の感度)"), 2),
+  Difference = c(
+    ai_results$estimates[1] - control_results$estimates[1],
+    ai_results$estimates[2] - control_results$estimates[2],
+    ai_results$estimates[3] - control_results$estimates[3],
+    ai_results_restricted$estimates[1] - control_results_restricted$estimates[1],
+    ai_results_restricted$estimates[2] - control_results_restricted$estimates[2],
+    ai_results_restricted$estimates[3] - control_results_restricted$estimates[3]
+  ),
+  SE = c(
+    sqrt(ai_results$se[1]^2 + control_results$se[1]^2),
+    sqrt(ai_results$se[2]^2 + control_results$se[2]^2),
+    sqrt(ai_results$se[3]^2 + control_results$se[3]^2),
+    sqrt(ai_results_restricted$se[1]^2 + control_results_restricted$se[1]^2),
+    sqrt(ai_results_restricted$se[2]^2 + control_results_restricted$se[2]^2),
+    sqrt(ai_results_restricted$se[3]^2 + control_results_restricted$se[3]^2)
+  )
+) %>%
+  mutate(
+    Z_value = Difference / SE,
+    P_value = 2 * (1 - pnorm(abs(Z_value))),
+    Significant = P_value < 0.05
+  )
+
+knitr::kable(test_results, 
+             caption = "条件間の差の検定結果",
+             digits = 3)
+```
+
+```{r define_values}
+# 結果の数値を変数として定義
+beta_ai <- ai_results_restricted$estimates[2]
+beta_control <- control_results_restricted$estimates[2]
+beta_diff <- beta_ai - beta_control
+beta_p <- test_results$P_value[5]  # Restricted sampleのβの検定結果
+
+lambda_ai <- ai_results_restricted$estimates[3]
+lambda_control <- control_results_restricted$estimates[3]
+lambda_diff <- lambda_ai - lambda_control
+lambda_p <- test_results$P_value[6]  # Restricted sampleのλの検定結果
+
+# λの比率
+lambda_ratio <- lambda_ai / lambda_control
+```
+
+以下の解釈があっているかどうか、ご確認いただけると幸いです。
+
+1. 有利な不平等に対する回避度（β）について：
+   - Restricted sampleにおいて、AI条件（β = `r round(beta_ai, 3)`)はコントロール条件（β = `r round(beta_control, 3)`)と比較して、有意に低い（差 = `r round(beta_diff, 3)`, p = `r round(beta_p, 3)`)
+   - AI条件では、自分が有利な状況において、むしろ不平等を選好する傾向があることを示唆
+   - つまり、AI学習データとして自分の選択が使用されることを意識した参加者は、より利己的な選択を行う傾向にあった
+
+2. 選択の感度パラメータ（λ）について：
+   - Restricted sampleにおいて、AI条件（λ = `r round(lambda_ai, 3)`)はコントロール条件（λ = `r round(lambda_control, 3)`)と比較して、有意に低い（差 = `r round(lambda_diff, 3)`, p = `r round(lambda_p, 3)`)
+   - λパラメータは選択の一貫性を表しており、値が大きいほど選好に基づいた一貫した選択を行っていることを意味
+   - AI条件の参加者は、コントロール条件と比べて約`r round(lambda_ratio, 2)`倍の選択感度しか示しておらず、より不確実な選択を行っていた
+   - つまり、自分の選択がAIの学習データとなることを意識することで、選択に迷いが生じた可能性を示唆
