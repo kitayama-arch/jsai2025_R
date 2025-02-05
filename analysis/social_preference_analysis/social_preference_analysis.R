@@ -6,6 +6,11 @@ library(car)
 library(emmeans)
 library(optimx)
 
+# パッケージの競合を解決
+select <- dplyr::select
+filter <- dplyr::filter
+some <- purrr::some
+
 # エラーハンドリング関数
 handle_data_loading <- function(file_path) {
   tryCatch({
@@ -120,6 +125,75 @@ data_control <- bind_rows(
 
 data_all <- bind_rows(data_ai, data_control)
 
+# メイン実行部分の前に診断コードを追加
+# データの状態確認
+print("=== データ診断 ===")
+
+# 条件ごとの参加者数とラウンド数の確認
+participant_summary <- data_all %>%
+  group_by(condition) %>%
+  summarise(
+    n_participants = n_distinct(participant.code),
+    total_rounds = n(),
+    avg_rounds_per_participant = mean(total_rounds),
+    sd_rounds_per_participant = sd(total_rounds)
+  )
+print("参加者とラウンドの要約:")
+print(participant_summary)
+
+# 選択の分布確認
+choice_summary <- data_all %>%
+  group_by(condition) %>%
+  summarise(
+    n_choices = n(),
+    prop_X = mean(choice_X, na.rm = TRUE),
+    sd_X = sd(choice_X, na.rm = TRUE)
+  )
+print("\n選択の分布:")
+print(choice_summary)
+
+# 効用差の分布確認
+utility_diagnostic <- function(data) {
+  # テスト用パラメータ
+  test_params <- c(0.1, 0.1, 1.0)  # α, β, λ
+  
+  # 効用差の計算
+  max_payoff <- max(c(data$Option_X_Dictator, data$Option_X_Receiver,
+                      data$Option_Y_Dictator, data$Option_Y_Receiver))
+  
+  utility_X <- with(data, {
+    s <- as.integer(Option_X_Receiver > Option_X_Dictator)
+    r <- as.integer(Option_X_Dictator > Option_X_Receiver)
+    (1 - test_params[1] * s - test_params[2] * r) * Option_X_Dictator / max_payoff + 
+    (test_params[1] * s + test_params[2] * r) * Option_X_Receiver / max_payoff
+  })
+  
+  utility_Y <- with(data, {
+    s <- as.integer(Option_Y_Receiver > Option_Y_Dictator)
+    r <- as.integer(Option_Y_Dictator > Option_Y_Receiver)
+    (1 - test_params[1] * s - test_params[2] * r) * Option_Y_Dictator / max_payoff + 
+    (test_params[1] * s + test_params[2] * r) * Option_Y_Receiver / max_payoff
+  })
+  
+  utility_diff <- utility_X - utility_Y
+  return(utility_diff)
+}
+
+# 条件ごとの効用差の分布
+utility_summary <- data_all %>%
+  group_by(condition) %>%
+  summarise(
+    mean_utility_diff = mean(utility_diagnostic(.)),
+    sd_utility_diff = sd(utility_diagnostic(.)),
+    min_utility_diff = min(utility_diagnostic(.)),
+    max_utility_diff = max(utility_diagnostic(.))
+  )
+print("\n効用差の分布:")
+print(utility_summary)
+
+# 最適化の収束状況の詳細確認
+print("\n=== 最適化の診断 ===")
+
 # 社会的選好パラメータの推定のための尤度関数
 likelihood_function <- function(params, data) {
   alpha <- params[1]  # 不利な不平等に対する回避度
@@ -171,10 +245,125 @@ likelihood_function <- function(params, data) {
   return(-log_likelihood)
 }
 
-# パラメータ推定関数の改善
-estimate_social_preferences <- function(data) {
-  # データの前処理
-  clean_data <- data %>%
+# 各条件でのパラメータ推定
+estimate_parameters <- function(clean_data) {
+  # グリッドサーチのパラメータ定義
+  alpha_grid <- seq(-0.5, 0.5, by = 0.1)
+  beta_grid <- seq(-0.5, 0.5, by = 0.1)
+  lambda_grid <- seq(0.1, 15.0, by = 1.0)
+  
+  # グリッドサーチによる初期値の探索
+  grid_results <- expand.grid(alpha = alpha_grid, beta = beta_grid, lambda = lambda_grid)
+  grid_results$value <- apply(grid_results, 1, function(params) {
+    tryCatch({
+      likelihood_function(params, clean_data)
+    }, error = function(e) Inf)
+  })
+  
+  # 最良の初期値を選択
+  best_start <- unlist(grid_results[which.min(grid_results$value), 1:3])
+  
+  # 最適化の実行
+          result <- optim(
+    par = best_start,
+            fn = likelihood_function,
+            data = clean_data,
+    method = "L-BFGS-B",
+    lower = c(-0.5, -0.5, 0.1),
+    upper = c(0.5, 0.5, 15.0),
+    control = list(maxit = 1000),
+            hessian = TRUE
+          )
+  
+  # ブートストラップによる標準誤差の推定
+  bootstrap_results <- bootstrap_estimates(clean_data, alpha_grid, beta_grid, lambda_grid)
+  
+  # 結果の整理
+  list(
+    estimates = result$par,
+    se = bootstrap_results$se,
+    convergence = result$convergence,
+    log_likelihood = -result$value,
+    bootstrap_results = bootstrap_results
+  )
+}
+
+# ブートストラップによる標準誤差の推定
+bootstrap_estimates <- function(clean_data, alpha_grid, beta_grid, lambda_grid, n_bootstrap = 1000) {
+  # 参加者のユニークIDを取得
+  unique_participants <- unique(clean_data$participant.code)
+  
+  # 進捗表示の準備
+  cat("ブートストラップ推定を開始 (", n_bootstrap, "回):\n")
+  pb <- txtProgressBar(min = 0, max = n_bootstrap, style = 3)
+  
+  # ブートストラップサンプルの生成と推定
+  bootstrap_results <- matrix(NA, nrow = 3, ncol = n_bootstrap)
+  
+  for (i in 1:n_bootstrap) {
+    # 参加者レベルでリサンプリング
+    sampled_participants <- sample(unique_participants, replace = TRUE)
+    
+    # 選択された参加者のデータを結合
+    bootstrap_data <- do.call(rbind, lapply(sampled_participants, function(p) {
+      clean_data[clean_data$participant.code == p, ]
+    }))
+    
+    # グリッドサーチの実行
+    grid_results <- expand.grid(alpha = alpha_grid, beta = beta_grid, lambda = lambda_grid)
+    grid_results$value <- apply(grid_results, 1, function(params) {
+      tryCatch({
+        likelihood_function(params, bootstrap_data)
+      }, error = function(e) Inf)
+    })
+    
+    # 最良の初期値を選択
+    best_start <- unlist(grid_results[which.min(grid_results$value), 1:3])
+    
+    # 最適化の実行
+    result <- tryCatch({
+      optim(
+        par = best_start,
+        fn = likelihood_function,
+        data = bootstrap_data,
+        method = "L-BFGS-B",
+        lower = c(-0.5, -0.5, 0.1),
+        upper = c(0.5, 0.5, 15.0),
+        control = list(maxit = 1000),
+        hessian = TRUE
+      )
+    }, error = function(e) NULL)
+    
+    if (!is.null(result) && result$convergence == 0) {
+      bootstrap_results[, i] <- result$par
+    }
+    
+    # 進捗表示の更新
+    setTxtProgressBar(pb, i)
+  }
+  
+  close(pb)
+  cat("\nブートストラップ推定完了\n")
+  
+  # 結果の要約
+  bootstrap_mean <- rowMeans(bootstrap_results, na.rm = TRUE)
+  bootstrap_se <- apply(bootstrap_results, 1, sd, na.rm = TRUE)
+  
+  # NA の割合を計算
+  na_proportion <- rowMeans(is.na(bootstrap_results))
+  cat(sprintf("\n収束失敗率: %.1f%%\n", mean(na_proportion) * 100))
+  
+  list(
+    estimates = bootstrap_mean,
+    se = bootstrap_se,
+    raw_results = bootstrap_results,
+    na_proportion = na_proportion
+  )
+}
+
+# データの準備
+prepare_data <- function(data) {
+  data %>%
     filter(!is.na(choice_X),
            !is.na(player.payoff_dictator),
            !is.na(player.payoff_receiver)) %>%
@@ -186,203 +375,70 @@ estimate_social_preferences <- function(data) {
       diff_payoff = player.payoff_dictator - player.payoff_receiver
     ) %>%
     ungroup()
-  
-  # より広いグリッドサーチ（改善1: より広い範囲）
-  alpha_grid <- seq(-0.5, 0.5, by = 0.05)  # 負の値も含める
-  beta_grid <- seq(-0.5, 0.5, by = 0.05)   # 負の値も含める
-  lambda_grid <- seq(0.1, 15.0, by = 0.5)  # より広い範囲
-  
-  grid_results <- expand.grid(alpha = alpha_grid, beta = beta_grid, lambda = lambda_grid)
-  grid_results$value <- apply(grid_results, 1, function(params) {
-    tryCatch({
-      likelihood_function(params, clean_data)
-    }, error = function(e) Inf)
-  })
-  
-  # 最良の初期値を選択（改善2: より多くの初期値）
-  best_starts <- grid_results[order(grid_results$value), ][1:30, 1:3]  # 上位30個に増やす
-  
-  # より多様な最適化アルゴリズムを試す（改善3）
-  methods <- c("L-BFGS-B", "Nelder-Mead", "BFGS", "CG", "SANN")  # SANNを追加
-  
-  all_results <- list()
-  
-  for (method in methods) {
-    for (i in 1:nrow(best_starts)) {
-      start <- unlist(best_starts[i, ])
-      tryCatch({
-        # SANNの場合は異なるパラメータを使用
-        if (method == "SANN") {
-          result <- optim(
-            par = start,
-            fn = likelihood_function,
-            data = clean_data,
-            method = method,
-            control = list(
-              maxit = 50000,
-              temp = 10,
-              tmax = 10
-            )
-          )
-        } else {
-          result <- optim(
-            par = start,
-            fn = likelihood_function,
-            data = clean_data,
-            method = method,
-            lower = c(-0.5, -0.5, 0.1),  # 下限を緩和
-            upper = c(0.5, 0.5, 15.0),   # 上限を緩和
-            control = list(
-              maxit = 50000,     # より多くの反復回数
-              reltol = 1e-12,    # より厳密な収束基準
-              factr = 1e3,       # より緩やかな収束基準
-              pgtol = 1e-10      # 勾配に対する収束基準
-            ),
-            hessian = TRUE
-          )
-        }
-        
-        if (result$convergence == 0) {
-          # 標準誤差の計算
-          if (!method == "SANN" && all(is.finite(result$hessian)) && det(result$hessian) > 1e-10) {
-            se <- sqrt(diag(solve(result$hessian)))
-            if (all(se < 1)) {  # 標準誤差が妥当な範囲内かチェック
-              result$se <- se
-              result$method <- method
-              all_results[[length(all_results) + 1]] <- result
-            }
-          } else if (method == "SANN") {
-            # SANNの場合は標準誤差を別途計算
-            se <- calculate_bootstrap_se(clean_data, result$par)
-            if (all(se < 1)) {
-              result$se <- se
-              result$method <- method
-              all_results[[length(all_results) + 1]] <- result
-            }
-          }
-        }
-      }, error = function(e) NULL)
-    }
-  }
-  
-  # 最良の結果を選択
-  if (length(all_results) == 0) {
-    warning("全ての最適化が失敗しました")
-    return(list(
-      par = c(NA, NA, NA),
-      value = NA,
-      convergence = -1,
-      se = c(NA, NA, NA)
-    ))
-  }
-  
-  # 対数尤度が最大で、かつ標準誤差が妥当な結果を選択
-  values <- sapply(all_results, function(x) x$value)
-  best_idx <- which.min(values)
-  best_result <- all_results[[best_idx]]
-  
-  return(best_result)
 }
 
-# ブートストラップによる標準誤差の計算
-calculate_bootstrap_se <- function(data, params) {
-  n_bootstrap <- 1000
-  bootstrap_params <- matrix(NA, nrow = n_bootstrap, ncol = length(params))
-  
-  for (i in 1:n_bootstrap) {
-    # データの再サンプリング
-    bootstrap_indices <- sample(1:nrow(data), replace = TRUE)
-    bootstrap_data <- data[bootstrap_indices, ]
-    
-    # パラメータ推定
-    result <- tryCatch({
-      optim(
-        par = params,
-        fn = likelihood_function,
-        data = bootstrap_data,
-        method = "L-BFGS-B",
-        lower = c(0.001, 0.001, 0.1),
-        upper = c(0.9, 0.9, 3.0),
-        control = list(
-          maxit = 1000,
-          factr = 1e3,
-          pgtol = 1e-10
-        )
-      )
-    }, error = function(e) NULL)
-    
-    if (!is.null(result) && result$convergence == 0) {
-      bootstrap_params[i, ] <- result$par
-    }
-  }
-  
-  # 標準誤差の計算
-  se <- apply(bootstrap_params, 2, sd, na.rm = TRUE)
-  return(se)
-}
+# AI条件とControl条件のデータを準備
+data_ai <- prepare_data(data_all %>% filter(condition == "AI"))
+data_control <- prepare_data(data_all %>% filter(condition == "Control"))
 
-# 条件ごとのパラメータ推定
-estimate_by_condition <- function(data) {
-  data %>%
-    group_by(condition) %>%
-    group_modify(~{
-      est <- estimate_social_preferences(.x)
-      tibble(
-        alpha = est$par[1],
-        beta = est$par[2],
-        lambda = est$par[3],
-        alpha_se = est$se[1],
-        beta_se = est$se[2],
-        lambda_se = est$se[3],
-        convergence = est$convergence,
-        log_likelihood = -est$value
-      )
-    })
-}
+# 各条件での分析実行
+ai_results <- estimate_parameters(data_ai)
+control_results <- estimate_parameters(data_control)
 
-# 条件間の社会的選好パラメータの比較
-compare_social_preferences <- function(results) {
-  # 結果をデータフレームに整形
-  comparison_df <- results %>%
-    mutate(
-      alpha_ci_lower = alpha - 1.96 * alpha_se,
-      alpha_ci_upper = alpha + 1.96 * alpha_se,
-      beta_ci_lower = beta - 1.96 * beta_se,
-      beta_ci_upper = beta + 1.96 * beta_se,
-      lambda_ci_lower = lambda - 1.96 * lambda_se,
-      lambda_ci_upper = lambda + 1.96 * lambda_se
-    )
-  
+# 結果のデータフレーム作成
+results_df <- tibble(
+  condition = c("AI", "Control"),
+  alpha = c(ai_results$estimates[1], control_results$estimates[1]),
+  beta = c(ai_results$estimates[2], control_results$estimates[2]),
+  lambda = c(ai_results$estimates[3], control_results$estimates[3]),
+  alpha_se = c(ai_results$se[1], control_results$se[1]),
+  beta_se = c(ai_results$se[2], control_results$se[2]),
+  lambda_se = c(ai_results$se[3], control_results$se[3]),
+  convergence = c(ai_results$convergence, control_results$convergence),
+  log_likelihood = c(ai_results$log_likelihood, control_results$log_likelihood)
+)
+
+# 結果の表示
   cat("\n=== 条件間の社会的選好パラメータ比較 ===\n\n")
   
   # 各条件のパラメータ推定値と95%信頼区間
   cat("1. 条件ごとのパラメータ推定値（95%信頼区間）:\n\n")
-  for (cond in unique(comparison_df$condition)) {
+
+for (cond in c("AI", "Control")) {
     cat(sprintf("\n%s条件:\n", cond))
-    cond_data <- comparison_df %>% filter(condition == cond)
-    if (!all(is.na(cond_data$alpha))) {
+  cond_data <- results_df %>% filter(condition == cond)
+  
+  if (!any(is.na(cond_data[, c("alpha", "beta", "lambda")]))) {
       cat(sprintf("α (不利な不平等回避) = %.3f (%.3f, %.3f)\n", 
-                 cond_data$alpha, cond_data$alpha_ci_lower, cond_data$alpha_ci_upper))
+               cond_data$alpha,
+               cond_data$alpha - 1.96 * cond_data$alpha_se,
+               cond_data$alpha + 1.96 * cond_data$alpha_se))
+    
       cat(sprintf("β (有利な不平等回避) = %.3f (%.3f, %.3f)\n", 
-                 cond_data$beta, cond_data$beta_ci_lower, cond_data$beta_ci_upper))
+               cond_data$beta,
+               cond_data$beta - 1.96 * cond_data$beta_se,
+               cond_data$beta + 1.96 * cond_data$beta_se))
+    
       cat(sprintf("λ (選択の感度) = %.3f (%.3f, %.3f)\n", 
-                 cond_data$lambda, cond_data$lambda_ci_lower, cond_data$lambda_ci_upper))
+               cond_data$lambda,
+               cond_data$lambda - 1.96 * cond_data$lambda_se,
+               cond_data$lambda + 1.96 * cond_data$lambda_se))
     } else {
       cat("パラメータの推定に失敗しました\n")
     }
   }
   
-  # 条件間の差の計算（AI - Control）
-  if (nrow(comparison_df) == 2 && !any(is.na(comparison_df$alpha))) {
-    ai_data <- comparison_df %>% filter(condition == "AI")
-    control_data <- comparison_df %>% filter(condition == "Control")
+# 条件間の差の計算と検定
+if (!any(is.na(results_df[, c("alpha", "beta", "lambda")]))) {
+  ai_data <- results_df %>% filter(condition == "AI")
+  control_data <- results_df %>% filter(condition == "Control")
     
     # 差の計算
     delta_alpha <- ai_data$alpha - control_data$alpha
     delta_beta <- ai_data$beta - control_data$beta
     delta_lambda <- ai_data$lambda - control_data$lambda
     
-    # 差の標準誤差（Klockmann et al. 2022と同様）
+  # 差の標準誤差
     se_diff_alpha <- sqrt(ai_data$alpha_se^2 + control_data$alpha_se^2)
     se_diff_beta <- sqrt(ai_data$beta_se^2 + control_data$beta_se^2)
     se_diff_lambda <- sqrt(ai_data$lambda_se^2 + control_data$lambda_se^2)
@@ -417,13 +473,104 @@ compare_social_preferences <- function(results) {
     cat(sprintf("λ: d = %.3f\n", d_lambda))
   }
   
-  return(comparison_df)
+cat("\n=== 分析結果 ===\n")
+print(results_df)
+
+# 結果の可視化
+plot_bootstrap_results <- function(ai_results, control_results) {
+  # パラメータ名と日本語ラベルの対応
+  param_labels <- c(
+    "alpha" = "α (不利な不平等回避)",
+    "beta" = "β (有利な不平等回避)",
+    "lambda" = "λ (選択の感度)"
+  )
+  
+  # ブートストラップ結果の整形
+  ai_boot <- as.data.frame(t(ai_results$bootstrap_results$raw_results))
+  control_boot <- as.data.frame(t(control_results$bootstrap_results$raw_results))
+  names(ai_boot) <- names(control_boot) <- c("alpha", "beta", "lambda")
+  
+  ai_boot$condition <- "AI"
+  control_boot$condition <- "Control"
+  
+  all_boot <- bind_rows(ai_boot, control_boot)
+  
+  # 密度プロット
+  density_plots <- lapply(c("alpha", "beta", "lambda"), function(param) {
+    ggplot(all_boot, aes(x = .data[[param]], fill = condition)) +
+      geom_density(alpha = 0.5) +
+      geom_vline(data = results_df, 
+                 aes(xintercept = .data[[param]], color = condition),
+                 linetype = "dashed") +
+      labs(title = param_labels[param],
+           x = "推定値",
+           y = "密度") +
+      theme_minimal() +
+      theme(text = element_text(family = "HiraKakuProN-W3")) +
+      scale_fill_manual(values = c("AI" = "#FF9999", "Control" = "#99CC99")) +
+      scale_color_manual(values = c("AI" = "#FF0000", "Control" = "#009900"))
+  })
+  
+  # 箱ひげ図
+  boxplots <- lapply(c("alpha", "beta", "lambda"), function(param) {
+    ggplot(all_boot, aes(x = condition, y = .data[[param]], fill = condition)) +
+      geom_boxplot() +
+      labs(title = param_labels[param],
+           x = "条件",
+           y = "推定値") +
+      theme_minimal() +
+      theme(text = element_text(family = "HiraKakuProN-W3")) +
+      scale_fill_manual(values = c("AI" = "#FF9999", "Control" = "#99CC99"))
+  })
+  
+  # 散布図行列
+  scatter_ai <- ggplot(ai_boot, aes(x = alpha, y = beta, color = "AI")) +
+    geom_point(alpha = 0.1) +
+    geom_density2d() +
+    labs(title = "パラメータ間の関係 (AI条件)") +
+    theme_minimal() +
+    theme(text = element_text(family = "HiraKakuProN-W3")) +
+    scale_color_manual(values = c("AI" = "#FF0000"))
+
+  scatter_control <- ggplot(control_boot, aes(x = alpha, y = beta, color = "Control")) +
+    geom_point(alpha = 0.1) +
+    geom_density2d() +
+    labs(title = "パラメータ間の関係 (Control条件)") +
+    theme_minimal() +
+    theme(text = element_text(family = "HiraKakuProN-W3")) +
+    scale_color_manual(values = c("Control" = "#009900"))
+  
+  # 結果の保存
+  ggsave("analysis/social_preference_analysis/density_alpha.png", density_plots[[1]], width = 8, height = 6)
+  ggsave("analysis/social_preference_analysis/density_beta.png", density_plots[[2]], width = 8, height = 6)
+  ggsave("analysis/social_preference_analysis/density_lambda.png", density_plots[[3]], width = 8, height = 6)
+  
+  ggsave("analysis/social_preference_analysis/boxplot_alpha.png", boxplots[[1]], width = 8, height = 6)
+  ggsave("analysis/social_preference_analysis/boxplot_beta.png", boxplots[[2]], width = 8, height = 6)
+  ggsave("analysis/social_preference_analysis/boxplot_lambda.png", boxplots[[3]], width = 8, height = 6)
+  
+  ggsave("analysis/social_preference_analysis/scatter_ai.png", scatter_ai, width = 8, height = 6)
+  ggsave("analysis/social_preference_analysis/scatter_control.png", scatter_control, width = 8, height = 6)
+  
+  # ブートストラップ結果の要約統計量
+  bootstrap_summary <- all_boot %>%
+    group_by(condition) %>%
+    summarise(
+      across(c(alpha, beta, lambda), 
+             list(
+               mean = ~mean(., na.rm = TRUE),
+               sd = ~sd(., na.rm = TRUE),
+               q025 = ~quantile(., 0.025, na.rm = TRUE),
+               q975 = ~quantile(., 0.975, na.rm = TRUE)
+             ))
+    )
+  
+  # 要約統計量をファイルに保存
+  write_csv(bootstrap_summary, "analysis/social_preference_analysis/bootstrap_summary.csv")
+  
+  cat("\n=== ブートストラップ推定の要約統計量 ===\n")
+  print(bootstrap_summary)
 }
 
-# メイン実行部分
-results <- estimate_by_condition(data_all)
-comparison_results <- compare_social_preferences(results)
-
-# 結果の表示
-print("=== 分析結果 ===")
-print(results)
+# 可視化の実行
+plot_bootstrap_results(ai_results, control_results)
