@@ -131,6 +131,51 @@ AI2025_R/
         - 個人別パラメータの密度プロット
         - パラメータ空間のクラスタ可視化（t-SNE法）
 
+   ### 利害対立ケースに限定した分析（Restricted Sample分析）
+   Klockmann et al. (2021) の手法に基づき、利害が完全に対立するケースに分析を限定した追加分析を実施
+
+   **分析の焦点**:
+   - 独裁者と受け手の利害が完全に相反する状況（X選択：独裁者利得 > 受け手利得，Y選択：独裁者利得 < 受け手利得）
+   - AI条件とコントロール条件での選択比率の差異
+   - 社会的選好パラメータ（α, β）の条件間比較
+
+   **分析手法**:
+   ```r
+   # 利害対立ケースの抽出
+   conflict_data <- merged_data %>%
+     filter(
+       (player.payoff_dictator_X > player.payoff_receiver_X) &
+       (player.payoff_dictator_Y < player.payoff_receiver_Y)
+     )
+
+   # 条件間選択比率比較
+   prop_test_result <- conflict_data %>%
+     group_by(condition) %>%
+     summarise(y_ratio = mean(player.choice == "Y")) %>%
+     t.test(y_ratio ~ condition, data = .)
+
+   # Restricted Sample用モデル
+   restricted_model <- lmer(
+     alpha ~ condition + (1|participant.id),
+     data = filter(preference_params, scenario_type == "conflict")
+   )
+   ```
+
+   **理論的意義**:
+   - 純粋な利他性/利己性が発現する状況の隔離分析
+   - AI介入の影響が最も顕在化する場面の特定
+   - 先行研究（Engelmann & Strobel, 2004; Iriberri & Rey-Biel, 2011）との比較可能性向上
+
+   **解釈上の注意点**:
+   - 選択肢の効率性（合計利得）の影響を統制する必要
+   - 学習効果（ラウンド進行に伴う選好変化）の調整が不可欠
+   - サンプルサイズ減少に伴う検出力低下のリスク
+
+   **追加検証案**:
+   - 利害対立度合いの連続的測定（利得差の絶対値で層別化）
+   - 選択一貫性指標（Gini係数）による個人別分析
+   - マルチレベルモデルによる個人内変動の捕捉
+
 3. **条件間の平均の差の分析** (`payoff_avg_analysis/payoff_avg_analysis.R`)
    - 使用変数：`player.payoff`（報酬額）
    - 分析内容：
