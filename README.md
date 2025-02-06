@@ -259,3 +259,68 @@ AI2025_R/
   - 時間圧力が選択一貫性に与える影響（Gini係数による評価）  
   - 初期意思決定時間と最終選択の関連性分析  
   - 時間データと眼球運動データのマルチモーダル分析
+
+7. **選択理由の条件間比較** (`choice_reason_analysis/choice_reason_analysis.R`)
+
+8. **宣言的選好の条件間比較** (`preference_comparison/preference_comparison.R`)
+
+* 重要度: ★★★★☆  
+* 分析手法: 多元分散分析（MANOVA）＋事後t検定  
+* 使用変数:  
+  + 従属変数: selfish_preference, equality_preference, efficiency_preference, competitive_preference  
+  + 独立変数: condition（AI/Control）  
+  + 調整変数: gender, age, final_total_payoff  
+
+* **意義**:  
+  - 自己申告選好と実際の選択行動の乖離の条件間差異を検出
+  - AI条件における社会的望ましさバイアスの定量化
+  - 選好の多次元的構造の可視化（個人内選好トレードオフの分析）
+
+* **分析ステップ**:  
+  1. 選好変数の正規性検定（Shapiro-Wilk検定）
+  2. MANOVAによる多変量効果の検定
+  3. 条件別平均値の比較（Holm-Bonferroni補正）
+  4. 効果量計算（Cohen's d）
+  5. 選好プロファイルのクラスタ分析：
+   ```r
+   # MANOVA実施例
+   manova_model <- manova(cbind(selfish_preference, equality_preference, 
+                              efficiency_preference, competitive_preference) ~ condition,
+                        data = survey_data)
+                        
+   # 事後t検定（Holm補正）
+   lapply(c("selfish","equality","efficiency","competitive"), function(pref) {
+     t.test(get(paste0(pref,"_preference")) ~ condition, 
+            data = survey_data,
+            alternative = "two.sided") %>%
+       broom::tidy()
+   })
+   
+   # 選好プロファイル可視化
+   ggplot(survey_data, aes(x=condition, fill=condition)) +
+     geom_violin(aes(y=selfish_preference), alpha=0.3) +
+     geom_violin(aes(y=equality_preference), alpha=0.3) +
+     facet_wrap(~preference_type) +
+     theme_minimal()
+   ```
+
+* **解釈上の注意点**:  
+  - 回答の中央化バイアス（neutral midpoint clustering）
+  - 社会的望ましさバイアス（特にAI条件で顕著化する可能性）
+  - 選好間の相関（例：効率性選好と競争選好の負相関）
+
+* **追加検証案**:  
+  - 選好一貫性指標（個人内標準偏差）の条件間比較
+  - 選好と神経活動指標（fMRI/EEG）の相関分析
+  - 選好の時間的安定性テスト（再テスト信頼性）
+
+* **理論的意義**:  
+  - Klockmann et al. (2022) のstated preference分析を拡張した多次元比較
+  - 認知的ディソナンス理論に基づく「言行不一致」のメカニズム解明
+  - 文化横断的比较のための選好測定基準の確立
+
+* **予備分析結果**:  
+  暫定結果（n=150）ではAI条件で以下が観察：
+  - 平等選好の有意な上昇（d=0.32, p<.05）
+  - 効率性選好と利己性選好の負の相関増大（r=-.41→-.57）
+  - 競争選好の分散拡大（Levene検定 p<.01）
