@@ -1,22 +1,22 @@
-Game,Option_X_Dictator,Option_X_Receiver,Option_Y_Dictator,Option_Y_Receiver,Category_Slope,Category_Position,Category_Efficiency,Category_Inequality,Is_Training
-2*,910,140,830,520,Selfish,Advantageous,Y,Y,TRUE
-5*,1010,190,730,470,Selfish,Advantageous,None,Y,TRUE
-7,1060,330,680,330,Receiver indiff.,Advantageous,X,Y,TRUE
-8,990,480,750,180,X Pareto,Advantageous,X,X,TRUE
-10,870,140,870,520,Dictator indiff.,Advantageous,Y,Y,TRUE
-12*,640,410,560,790,Selfish,Mixed,Y,None,TRUE
-15*,740,460,460,740,Selfish,Mixed,None,None,TRUE
-17,790,600,410,600,Receiver indiff.,Mixed,X,None,TRUE
-18,720,750,480,450,X Pareto-dom.,Mixed,X,None,TRUE
-20,600,410,600,790,Dictator indiff.,Mixed,Y,None,TRUE
-22*,370,680,290,1060,Selfish,Disadvantageous,Y,X,TRUE
-25*,470,730,190,1010,Selfish,Disadvantageous,None,X,TRUE
-27,520,870,140,870,Receiver indiff.,Disadvantageous,X,X,TRUE
-28,450,1020,210,720,X Pareto-dom.,Disadvantageous,X,Y,TRUE
-30,330,680,330,1060,Dictator indiff.,Disadvantageous,Y,X,TRUE
-1,1030,220,710,440,Selfish,Advantageous,X,Y,FALSE
-2,960,500,780,160,X Pareto,Advantageous,X,X,FALSE
-3,760,490,440,710,Selfish,Mixed,X,None,FALSE
-4,690,770,510,430,X Pareto,Mixed,X,None,FALSE
-5,490,760,170,980,Selfish,Disadvantageous,X,X,FALSE
-6,420,1040,240,700,X Pareto,Disadvantageous,X,Y,FALSE
+Game,Option_X_Dictator,Option_X_Receiver,Option_Y_Dictator,Option_Y_Receiver,Category_Slope,Category_Position,Category_Efficiency,Category_Inequality,Is_Training,is_Restricted
+1,910,140,830,520,Selfish,Advantageous,Y,Y,True,True
+2,1010,190,730,470,Selfish,Advantageous,None,Y,True,True
+3,1060,330,680,330,Receiver indiff.,Advantageous,X,Y,True,False
+4,990,480,750,180,X Pareto,Advantageous,X,X,True,False
+5,870,140,870,520,Dictator indiff.,Advantageous,Y,Y,True,False
+6,640,410,560,790,Selfish,Mixed,Y,None,True,True
+7,740,460,460,740,Selfish,Mixed,None,None,True,True
+8,790,600,410,600,Receiver indiff.,Mixed,X,None,True,False
+9,720,750,480,450,X Pareto-dom.,Mixed,X,None,True,False
+10,600,410,600,790,Dictator indiff.,Mixed,Y,None,True,False
+11,370,680,290,1060,Selfish,Disadvantageous,Y,X,True,True
+12,470,730,190,1010,Selfish,Disadvantageous,None,X,True,True
+13,520,870,140,870,Receiver indiff.,Disadvantageous,X,X,True,False
+14,450,1020,210,720,X Pareto-dom.,Disadvantageous,X,Y,True,False
+15,330,680,330,1060,Dictator indiff.,Disadvantageous,Y,X,True,False
+1,1030,220,710,440,Selfish,Advantageous,X,Y,False,False
+2,960,500,780,160,X Pareto,Advantageous,X,X,False,False
+3,760,490,440,710,Selfish,Mixed,X,None,False,False
+4,690,770,510,430,X Pareto,Mixed,X,None,False,False
+5,490,760,170,980,Selfish,Disadvantageous,X,X,False,False
+6,420,1040,240,700,X Pareto,Disadvantageous,X,Y,False,False
