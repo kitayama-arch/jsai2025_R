@@ -18,13 +18,15 @@ library(ggplot2)
 
 ```{r load_and_process_data}
 # CSVデータを読み込む
-data <- read.csv("Table.csv")
+data <- read.csv("payoffTable.csv")
 
 # Is_Training 列を論理型に変換
 data$Is_Training <- as.logical(data$Is_Training)
+data$Is_Restricted <- as.logical(data$Is_Restricted)
 
 # NA がある場合の処理
 data$Is_Training[is.na(data$Is_Training)] <- FALSE
+data$Is_Restricted[is.na(data$Is_Restricted)] <- FALSE
 
 # 線のデータを準備
 data_lines <- data.frame(
@@ -33,13 +35,13 @@ data_lines <- data.frame(
   X_Receiver = data$Option_X_Receiver,
   Y_Dictator = data$Option_Y_Dictator,
   Y_Receiver = data$Option_Y_Receiver,
-  Is_Training = data$Is_Training
+  Is_Training = data$Is_Training,
+  Is_Restricted = data$Is_Restricted
 )
 
 # 線の種類を設定
 data_lines$Line_Type <- ifelse(data_lines$Is_Training, "solid", "dotted")
 ```
-
 ```{r create_plot, fig.width=8, fig.height=8}
 # プロット作成
 ggplot() +
@@ -54,21 +56,38 @@ ggplot() +
     color = "black",
     size = 1
   ) +
-  # Option X のポイントを描画
+  # Option X のポイントを描画（制限付きサンプルはアスタリスク付き）
   geom_point(
     data = data_lines,
     aes(x = X_Dictator, y = X_Receiver),
     color = "blue", size = 5, shape = 15
   ) +
-  # Option Y のポイントを描画
+  geom_text(
+    data = subset(data_lines, Is_Restricted),
+    aes(x = X_Dictator, y = X_Receiver),
+    label = "*",
+    color = "black",
+    size = 6,
+    vjust = -0.2
+  ) +
+  # Option Y のポイントを描画（制限付きサンプルはアスタリスク付き）
   geom_point(
     data = data_lines,
     aes(x = Y_Dictator, y = Y_Receiver),
     color = "red", size = 5, shape = 16
   ) +
-  # 説明テキストを追加
+  geom_text(
+    data = subset(data_lines, Is_Restricted),
+    aes(x = Y_Dictator, y = Y_Receiver),
+    label = "*",
+    color = "black",
+    size = 6,
+    vjust = -0.2
+  ) +
+    # 説明テキストを追加
   annotate("text", x = 800, y = 1000, label = "■ Option X", color = "blue", size = 6, hjust = 0) +
   annotate("text", x = 800, y = 900, label = "● Option Y", color = "red", size = 6, hjust = 0) +
+  annotate("text", x = 800, y = 800, label = "* Restricted", color = "black", size = 6, hjust = 0) +
   # ラベルとテーマ設定
   labs(
     x = "Dictator's Payoff",
