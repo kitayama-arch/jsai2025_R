@@ -1,0 +1,120 @@
+決定木分析の詳細結果:
+
+n= 53 
+
+node), split, n, deviance, yval
+      * denotes terminal node
+
+ 1) root 53 140.18870 2.641509  
+   2) competitive_preference>=6.5 13  25.69231 1.846154  
+     4) efficiency_preference< 3.5 4   0.75000 1.250000 *
+     5) efficiency_preference>=3.5 9  22.88889 2.111111 *
+   3) competitive_preference< 6.5 40 103.60000 2.900000  
+     6) competitive_preference< 4.5 22  47.09091 2.363636  
+      12) efficiency_preference< 2.5 4   1.00000 1.500000 *
+      13) efficiency_preference>=2.5 18  42.44444 2.555556 *
+     7) competitive_preference>=4.5 18  42.44444 3.555556  
+      14) condition=Control 10  20.00000 3.000000 *
+      15) condition=AI 8  15.50000 4.250000 *
+
+
+ノードごとの詳細情報:
+Call:
+rpart(formula = equality_preference ~ efficiency_preference + 
+    competitive_preference + condition, data = survey_data, control = rpart.control(maxdepth = 3, 
+    minsplit = 10))
+  n= 53 
+
+          CP nsplit rel error   xerror      xstd
+1 0.08902651      0 1.0000000 1.049665 0.1573234
+2 0.04953641      2 0.8219470 1.135479 0.1909771
+3 0.02601112      3 0.7724106 1.097079 0.1936265
+4 0.01464754      4 0.7463994 1.157022 0.2053847
+5 0.01000000      5 0.7317519 1.194774 0.2385359
+
+Variable importance
+competitive_preference  efficiency_preference              condition 
+                    60                     23                     17 
+
+Node number 1: 53 observations,    complexity param=0.08902651
+  mean=2.641509, MSE=2.645069 
+  left son=2 (13 obs) right son=3 (40 obs)
+  Primary splits:
+      competitive_preference < 6.5 to the right, improve=0.077726470, (0 missing)
+      efficiency_preference  < 1.5 to the left,  improve=0.065877380, (0 missing)
+      condition              splits as  RL,      improve=0.003118957, (0 missing)
+
+Node number 2: 13 observations,    complexity param=0.01464754
+  mean=1.846154, MSE=1.976331 
+  left son=4 (4 obs) right son=5 (9 obs)
+  Primary splits:
+      efficiency_preference < 3.5 to the left,  improve=0.07992349, (0 missing)
+      condition             splits as  RL,      improve=0.03992016, (0 missing)
+
+Node number 3: 40 observations,    complexity param=0.08902651
+  mean=2.9, MSE=2.59 
+  left son=6 (22 obs) right son=7 (18 obs)
+  Primary splits:
+      competitive_preference < 4.5 to the left,  improve=0.13575910, (0 missing)
+      efficiency_preference  < 5.5 to the left,  improve=0.07484407, (0 missing)
+      condition              splits as  RL,      improve=0.01471826, (0 missing)
+  Surrogate splits:
+      efficiency_preference < 5.5 to the left,  agree=0.65, adj=0.222, (0 split)
+
+Node number 4: 4 observations
+  mean=1.25, MSE=0.1875 
+
+Node number 5: 9 observations
+  mean=2.111111, MSE=2.54321 
+
+Node number 6: 22 observations,    complexity param=0.02601112
+  mean=2.363636, MSE=2.140496 
+  left son=12 (4 obs) right son=13 (18 obs)
+  Primary splits:
+      efficiency_preference  < 2.5 to the left,  improve=0.077434580, (0 missing)
+      competitive_preference < 1.5 to the right, improve=0.009413495, (0 missing)
+      condition              splits as  LR,      improve=0.003861004, (0 missing)
+
+Node number 7: 18 observations,    complexity param=0.04953641
+  mean=3.555556, MSE=2.358025 
+  left son=14 (10 obs) right son=15 (8 obs)
+  Primary splits:
+      condition              splits as  RL,      improve=0.16361260, (0 missing)
+      efficiency_preference  < 3.5 to the right, improve=0.02393418, (0 missing)
+      competitive_preference < 5.5 to the right, improve=0.02094241, (0 missing)
+  Surrogate splits:
+      efficiency_preference < 5.5 to the left,  agree=0.611, adj=0.125, (0 split)
+
+Node number 12: 4 observations
+  mean=1.5, MSE=0.25 
+
+Node number 13: 18 observations
+  mean=2.555556, MSE=2.358025 
+
+Node number 14: 10 observations
+  mean=3, MSE=2 
+
+Node number 15: 8 observations
+  mean=4.25, MSE=1.9375 
+
+n= 53 
+
+node), split, n, deviance, yval
+      * denotes terminal node
+
+ 1) root 53 140.18870 2.641509  
+   2) competitive_preference>=6.5 13  25.69231 1.846154  
+     4) efficiency_preference< 3.5 4   0.75000 1.250000 *
+     5) efficiency_preference>=3.5 9  22.88889 2.111111 *
+   3) competitive_preference< 6.5 40 103.60000 2.900000  
+     6) competitive_preference< 4.5 22  47.09091 2.363636  
+      12) efficiency_preference< 2.5 4   1.00000 1.500000 *
+      13) efficiency_preference>=2.5 18  42.44444 2.555556 *
+     7) competitive_preference>=4.5 18  42.44444 3.555556  
+      14) condition=Control 10  20.00000 3.000000 *
+      15) condition=AI 8  15.50000 4.250000 *
+
+
+変数重要度:
+competitive_preference  efficiency_preference              condition 
+             24.961018               9.693416               6.944444 

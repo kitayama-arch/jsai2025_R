@@ -158,3 +158,160 @@ library(rmarkdown)    # ドキュメント作成
 ---
 
 以上の内容を順守し、分析タスクを遂行してください。
+
+# 可視化のベストプラクティス
+
+## 効果的な可視化のための基本設定
+```r
+# 必要なパッケージ
+library(tidyverse)    # データ操作と基本的な可視化
+library(ggplot2)      # 可視化の中心的なパッケージ
+library(scales)       # 軸のスケール調整
+library(viridis)      # カラーパレット（カラーユニバーサルデザイン対応）
+library(patchwork)    # 複数プロットの組み合わせ
+
+# 基本的なテーマ設定
+theme_custom <- function() {
+  theme_minimal() +
+    theme(
+      # 背景設定
+      panel.background = element_rect(fill = "white", color = NA),
+      plot.background = element_rect(fill = "white", color = NA),
+      
+      # グリッド線
+      panel.grid.major = element_line(color = "grey90"),
+      panel.grid.minor = element_line(color = "grey95"),
+      
+      # テキスト設定
+      text = element_text(family = "Helvetica"),
+      axis.text = element_text(size = 10),
+      axis.title = element_text(size = 12),
+      plot.title = element_text(size = 14, face = "bold"),
+      
+      # 凡例設定
+      legend.position = "right",
+      legend.background = element_rect(fill = "white", color = NA),
+      
+      # ファセット設定
+      strip.background = element_rect(fill = "grey95"),
+      strip.text = element_text(size = 11, face = "bold")
+    )
+}
+
+# カラーパレットの設定
+custom_colors <- function(n = 2) {
+  # カラーユニバーサルデザイン対応の色
+  if (n <= 2) {
+    return(c("#1B9E77", "#D95F02"))
+  } else {
+    return(viridis(n))
+  }
+}
+
+# プロット作成の基本テンプレート
+create_plot <- function(data, mapping, type = "point") {
+  p <- ggplot(data, mapping) +
+    theme_custom()
+  
+  # プロットタイプに応じた設定
+  if (type == "point") {
+    p <- p + 
+      geom_point(alpha = 0.6) +
+      geom_smooth(method = "lm", se = TRUE, alpha = 0.2)
+  } else if (type == "distribution") {
+    p <- p +
+      geom_density(alpha = 0.6) +
+      scale_fill_manual(values = custom_colors())
+  }
+  
+  return(p)
+}
+
+# 保存設定
+save_plot <- function(plot, filename, width = 10, height = 8, dpi = 300) {
+  ggsave(
+    filename,
+    plot,
+    width = width,
+    height = height,
+    dpi = dpi,
+    bg = "white"
+  )
+}
+```
+
+### 使用例
+```r
+# 分布の比較
+dist_plot <- create_plot(
+  data = long_data,
+  mapping = aes(x = value, fill = group),
+  type = "distribution"
+)
+
+# 散布図
+scatter_plot <- create_plot(
+  data = data,
+  mapping = aes(x = x, y = y, color = group),
+  type = "point"
+)
+
+# 複数プロットの組み合わせ
+combined_plot <- dist_plot + scatter_plot +
+  plot_layout(ncol = 2) +
+  plot_annotation(
+    title = "分析結果の可視化",
+    theme = theme(plot.title = element_text(size = 16))
+  )
+
+# 保存
+save_plot(combined_plot, "analysis_results.png")
+```
+
+### デザイン原則
+1. **シンプルさ**
+   - 不要な装飾を避ける
+   - データインクの最適化（データを表現する要素の効率的な使用）
+   - 余白の適切な活用
+
+2. **一貫性**
+   - フォントの統一
+   - 色使いの一貫性
+   - スケールの適切な設定
+
+3. **アクセシビリティ**
+   - カラーユニバーサルデザインの採用
+   - 十分なコントラスト
+   - 適切なフォントサイズ
+
+4. **情報の階層化**
+   - 透明度（alpha）による重要度の表現
+   - 色の濃淡による情報の区別
+   - グリッド線の適切な強調
+
+### カスタマイズのポイント
+1. **テーマ設定**
+   - 背景色の調整
+   - グリッド線の可視性
+   - テキストスタイル
+
+2. **カラーパレット**
+   - 目的に応じた色の選択
+   - カラーユニバーサルデザインへの配慮
+   - コントラストの確保
+
+3. **レイアウト**
+   - 適切なアスペクト比
+   - 凡例の位置
+   - 余白の調整
+
+4. **出力設定**
+   - 解像度の最適化
+   - ファイルサイズの考慮
+   - 出力形式の選択
+
+### 注意点
+- データの特性に応じた可視化手法の選択
+- スケールの適切な設定（対数スケールの使用など）
+- 複数プロットを組み合わせる際のバランス
+- 出力環境（印刷・画面）に応じた設定の調整

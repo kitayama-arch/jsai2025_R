@@ -18,7 +18,7 @@ library(ggplot2)
 
 ```{r load_and_process_data}
 # CSVデータを読み込む
-data <- read.csv("Table.csv")
+data <- read.csv("payoff_scenarios_analysis.csv")
 
 # Is_Training 列を論理型に変換
 data$Is_Training <- as.logical(data$Is_Training)
@@ -40,7 +40,7 @@ data_lines <- data.frame(
 data_lines$Line_Type <- ifelse(data_lines$Is_Training, "solid", "dotted")
 ```
 
-```{r create_plot, fig.width=12, fig.height=12}
+```{r create_plot, fig.width=8, fig.height=8}
 # プロット作成
 ggplot() +
   # 線を描画
@@ -51,45 +51,33 @@ ggplot() +
       xend = Y_Dictator, yend = Y_Receiver,
       linetype = Line_Type
     ),
-    color = "black"
+    color = "black",
+    size = 1
   ) +
   # Option X のポイントを描画
   geom_point(
     data = data_lines,
     aes(x = X_Dictator, y = X_Receiver),
-    color = "blue", size = 4, shape = 15
-  ) +
-  # Option X の横にゲーム番号を表示
-  geom_text(
-    data = data_lines,
-    aes(x = X_Dictator, y = X_Receiver, label = Game),
-    nudge_x = 20, nudge_y = 20,
-    size = 4
+    color = "blue", size = 5, shape = 15
   ) +
   # Option Y のポイントを描画
   geom_point(
     data = data_lines,
     aes(x = Y_Dictator, y = Y_Receiver),
-    color = "red", size = 4, shape = 16
+    color = "red", size = 5, shape = 16
   ) +
-  # Option Y の横にゲーム番号を表示
-  geom_text(
-    data = data_lines,
-    aes(x = Y_Dictator, y = Y_Receiver, label = Game),
-    nudge_x = 20, nudge_y = 20,
-    size = 4
-  ) +
+  # 説明テキストを追加
+  annotate("text", x = 800, y = 1000, label = "■ Option X", color = "blue", size = 6, hjust = 0) +
+  annotate("text", x = 800, y = 900, label = "● Option Y", color = "red", size = 6, hjust = 0) +
   # ラベルとテーマ設定
   labs(
     x = "Dictator's Payoff",
     y = "Receiver's Payoff",
-    title = "Payoff Scenarios in the Dictator Game",
-    linetype = "Line Type (Is_Training)"
+    title = "Payoff Scenarios in the Dictator Game"
   ) +
   # linetype の凡例設定
   scale_linetype_manual(
-    values = c("solid" = "solid", "dotted" = "dotted"),
-    labels = c("solid" = "Training (TRUE)", "dotted" = "Not Training (FALSE)")
+    values = c("solid" = "solid", "dotted" = "dotted")
   ) +
   # 縦横比を1:1に固定
   coord_fixed(ratio = 1) +
@@ -98,11 +86,10 @@ ggplot() +
   scale_y_continuous(limits = c(0, 1100)) +
   theme_minimal() +
   theme(
-    legend.title = element_text(size = 12),
-    legend.text = element_text(size = 11),
-    axis.title = element_text(size = 14),
-    axis.text = element_text(size = 12),
-    plot.title = element_text(size = 16),
+    legend.position = "none",  # 凡例を非表示に
+    axis.title = element_text(size = 20),
+    axis.text = element_text(size = 18),
+    plot.title = element_text(size = 22),
     aspect.ratio = 1,
     plot.margin = margin(30, 30, 30, 30, "pt")
   )
