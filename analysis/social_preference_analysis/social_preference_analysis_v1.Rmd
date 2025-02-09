@@ -56,7 +56,7 @@ handle_data_loading <- function(file_path) {
 ## 実験データの読み込み
 ```{r}
 # 選択肢データ
-payoff_scenarios <- handle_data_loading("Experiment/payoff_scenarios_analysis.csv")
+payoff_scenarios <- handle_data_loading("Experiment/payoffTable.csv")
 
 # AI条件のデータ
 data_0117_3 <- handle_data_loading("AI2025_data/20250117_3/dictator_app_2025-01-17.csv")

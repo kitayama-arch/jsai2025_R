@@ -58,7 +58,7 @@ handle_data_loading <- function(file_path) {
 
 # データの読み込み
 # 選択肢データの読み込み
-payoff_scenarios <- handle_data_loading("Experiment/payoff_scenarios_analysis.csv") %>%
+payoff_scenarios <- handle_data_loading("Experiment/payoffTable.csv") %>%
   mutate(
     # Klockmann et al. (2023)の分類に基づく
     position = Category_2_Position,

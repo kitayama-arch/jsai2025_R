@@ -262,8 +262,6 @@ AI2025_R/
 
 7. **選択理由の条件間比較** (`choice_reason_analysis/choice_reason_analysis.R`)
 
-8. **宣言的選好の条件間比較** (`preference_comparison/preference_comparison.R`)
-
 * 重要度: ★★★★☆  
 * 分析手法: 多元分散分析（MANOVA）＋事後t検定  
 * 使用変数:  

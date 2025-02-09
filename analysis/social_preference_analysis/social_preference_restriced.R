@@ -26,7 +26,7 @@ handle_data_loading <- function(file_path) {
 
 # データの読み込み
 # 選択肢データの読み込み
-payoff_scenarios <- handle_data_loading("../../Experiment/payoff_scenarios_analysis.csv") %>%
+payoff_scenarios <- handle_data_loading("Experiment/payoffTable.csv") %>%
   mutate(
     # Klockmann et al. (2023)の分類に基づく
     position = Category_2_Position,
@@ -38,11 +38,11 @@ payoff_scenarios <- handle_data_loading("../../Experiment/payoff_scenarios_analy
   )
 
 # AI条件の独裁者ゲームデータ
-data_0117_3 <- handle_data_loading("../../AI2025_data/20250117_3/dictator_app_2025-01-17.csv")
-data_0120_5 <- handle_data_loading("../../AI2025_data/20250120_5/dictator_app_2025-01-20.csv")
+data_0117_3 <- handle_data_loading("AI2025_data/20250117_3/dictator_app_2025-01-17.csv")
+data_0120_5 <- handle_data_loading("AI2025_data/20250120_5/dictator_app_2025-01-20.csv")
 # コントロール条件の独裁者ゲームデータ
-data_0117_4 <- handle_data_loading("../../AI2025_data/20250117_4/Base_dictator_app_2025-01-17.csv")
-data_0120_4 <- handle_data_loading("../../AI2025_data/20250120_4/Base_dictator_app_2025-01-20.csv")
+data_0117_4 <- handle_data_loading("AI2025_data/20250117_4/Base_dictator_app_2025-01-17.csv")
+data_0120_4 <- handle_data_loading("AI2025_data/20250120_4/Base_dictator_app_2025-01-20.csv")
 
 # データクリーニングと前処理
 clean_dictator_data <- function(data, is_control = FALSE) {
@@ -67,7 +67,8 @@ clean_dictator_data <- function(data, is_control = FALSE) {
           Game,
           Option_X_Dictator, Option_X_Receiver,
           Option_Y_Dictator, Option_Y_Receiver,
-          position, is_selfish, should_include, klockmann_restricted
+          position, is_selfish, should_include, klockmann_restricted,
+          Category_1_Slope  # 分類情報を追加
         ),
       by = c("subsession.round_number" = "Game")
     ) %>%
@@ -81,10 +82,11 @@ clean_dictator_data <- function(data, is_control = FALSE) {
         player.choice == "X" ~ Option_Y_Receiver,
         player.choice == "Y" ~ Option_X_Receiver
       ),
-      # Klockmann et al. (2023)の定義に基づくSelfish選択の判定
+      # Klockmann et al. (2023)の定義に基づくSelfish選択の判定を更新
       is_selfish_choice = case_when(
-        player.choice == "X" & Option_X_Dictator > Option_Y_Dictator ~ TRUE,
-        player.choice == "Y" & Option_Y_Dictator > Option_X_Dictator ~ TRUE,
+        Category_1_Slope == "Selfish" & 
+          ((player.choice == "X" & Option_X_Dictator > Option_Y_Dictator) |
+           (player.choice == "Y" & Option_Y_Dictator > Option_X_Dictator)) ~ TRUE,
         TRUE ~ FALSE
       )
     )
@@ -482,8 +484,6 @@ for (cond in c("AI", "Control")) {
 
 # 結果の可視化
 plot_bootstrap_results <- function(ai_results, control_results, ai_results_restricted, control_results_restricted) {
-  # Klockmann et al. (2023)のスタイルの可視化を追加
-  
   # 立場ごとのSelfish選択率の箱ひげ図
   position_boxplot <- ggplot() +
     geom_boxplot(data = data_ai %>% 
@@ -494,12 +494,12 @@ plot_bootstrap_results <- function(ai_results, control_results, ai_results_restr
                    group_by(participant.code, position) %>%
                    summarise(selfish_rate = mean(is_selfish_choice, na.rm = TRUE), .groups = "drop"),
                  aes(x = position, y = selfish_rate, fill = "Control")) +
-      scale_fill_manual(values = c("AI" = "#FF9999", "Control" = "#99CC99")) +
+    scale_fill_manual(values = c("AI" = "#FF9999", "Control" = "#99CC99")) +
     labs(title = "立場ごとのSelfish選択率",
          x = "Position",
          y = "Selfish選択率",
          fill = "条件") +
-      theme_minimal() +
+    theme_minimal() +
     theme(text = element_text(family = "HiraKakuProN-W3"))
   
   # 立場ごとの選択率の時系列プロット
@@ -523,35 +523,9 @@ plot_bootstrap_results <- function(ai_results, control_results, ai_results_restr
     theme_minimal() +
     theme(text = element_text(family = "HiraKakuProN-W3"))
   
-  # 新しいプロットを保存
+  # プロットを保存
   ggsave("analysis/social_preference_analysis/position_selfish_rate.png", position_boxplot, width = 10, height = 6)
   ggsave("analysis/social_preference_analysis/time_series_selfish_rate.png", time_series_plot, width = 12, height = 6)
-  
-  # ブートストラップ結果の要約統計量
-  bootstrap_summary <- ai_results$bootstrap_results$raw_results %>%
-    as.data.frame() %>%
-    mutate(condition = "AI") %>%
-    bind_rows(
-      control_results$bootstrap_results$raw_results %>%
-        as.data.frame() %>%
-        mutate(condition = "Control")
-    ) %>%
-    group_by(condition) %>%
-    summarise(
-      across(c(alpha, beta, lambda), 
-             list(
-               mean = ~mean(., na.rm = TRUE),
-               sd = ~sd(., na.rm = TRUE),
-               q025 = ~quantile(., 0.025, na.rm = TRUE),
-               q975 = ~quantile(., 0.975, na.rm = TRUE)
-             ))
-    )
-  
-  # 要約統計量をファイルに保存
-  write_csv(bootstrap_summary, "analysis/social_preference_analysis/bootstrap_summary.csv")
-  
-  cat("\n=== ブートストラップ推定の要約統計量 ===\n")
-  print(bootstrap_summary)
 }
 
 # 可視化の実行
@@ -832,3 +806,149 @@ write_results_markdown <- function(ai_results, control_results, ai_results_restr
 
 # 結果の出力
 write_results_markdown(ai_results, control_results, ai_results_restricted, control_results_restricted, results_df)
+
+# 結果をファイルに出力
+sink("analysis/social_preference_analysis/social_preference_restricted_results.txt")
+
+cat("\n=== 社会的選好パラメータの分析結果 ===\n\n")
+
+# 1. 全サンプルでの分析結果
+cat("1. 全サンプルでの分析結果\n\n")
+
+cat("AI条件:\n")
+cat(sprintf("α (不利な不平等回避) = %.3f (%.3f, %.3f)\n", 
+            ai_results$estimates[1], 
+            ai_results$estimates[1] - 1.96 * ai_results$se[1],
+            ai_results$estimates[1] + 1.96 * ai_results$se[1]))
+cat(sprintf("β (有利な不平等回避) = %.3f (%.3f, %.3f)\n", 
+            ai_results$estimates[2],
+            ai_results$estimates[2] - 1.96 * ai_results$se[2],
+            ai_results$estimates[2] + 1.96 * ai_results$se[2]))
+cat(sprintf("λ (選択の感度) = %.3f (%.3f, %.3f)\n\n", 
+            ai_results$estimates[3],
+            ai_results$estimates[3] - 1.96 * ai_results$se[3],
+            ai_results$estimates[3] + 1.96 * ai_results$se[3]))
+
+cat("Control条件:\n")
+cat(sprintf("α (不利な不平等回避) = %.3f (%.3f, %.3f)\n", 
+            control_results$estimates[1],
+            control_results$estimates[1] - 1.96 * control_results$se[1],
+            control_results$estimates[1] + 1.96 * control_results$se[1]))
+cat(sprintf("β (有利な不平等回避) = %.3f (%.3f, %.3f)\n", 
+            control_results$estimates[2],
+            control_results$estimates[2] - 1.96 * control_results$se[2],
+            control_results$estimates[2] + 1.96 * control_results$se[2]))
+cat(sprintf("λ (選択の感度) = %.3f (%.3f, %.3f)\n\n", 
+            control_results$estimates[3],
+            control_results$estimates[3] - 1.96 * control_results$se[3],
+            control_results$estimates[3] + 1.96 * control_results$se[3]))
+
+# 全サンプルでの条件間の差
+cat("条件間の差（AI - Control）:\n")
+delta_alpha <- ai_results$estimates[1] - control_results$estimates[1]
+delta_beta <- ai_results$estimates[2] - control_results$estimates[2]
+delta_lambda <- ai_results$estimates[3] - control_results$estimates[3]
+
+se_diff_alpha <- sqrt(ai_results$se[1]^2 + control_results$se[1]^2)
+se_diff_beta <- sqrt(ai_results$se[2]^2 + control_results$se[2]^2)
+se_diff_lambda <- sqrt(ai_results$se[3]^2 + control_results$se[3]^2)
+
+z_alpha <- delta_alpha / se_diff_alpha
+z_beta <- delta_beta / se_diff_beta
+z_lambda <- delta_lambda / se_diff_lambda
+
+p_alpha <- 2 * (1 - pnorm(abs(z_alpha)))
+p_beta <- 2 * (1 - pnorm(abs(z_beta)))
+p_lambda <- 2 * (1 - pnorm(abs(z_lambda)))
+
+cat(sprintf("Δα = %.3f (z = %.3f, p = %.3f)%s\n", 
+            delta_alpha, z_alpha, p_alpha,
+            ifelse(p_alpha < 0.05, " *", "")))
+cat(sprintf("Δβ = %.3f (z = %.3f, p = %.3f)%s\n", 
+            delta_beta, z_beta, p_beta,
+            ifelse(p_beta < 0.05, " *", "")))
+cat(sprintf("Δλ = %.3f (z = %.3f, p = %.3f)%s\n\n", 
+            delta_lambda, z_lambda, p_lambda,
+            ifelse(p_lambda < 0.05, " *", "")))
+
+# 2. Restricted sampleでの分析結果
+cat("2. Restricted sampleでの分析結果\n\n")
+
+cat("AI条件:\n")
+cat(sprintf("α (不利な不平等回避) = %.3f (%.3f, %.3f)\n", 
+            ai_results_restricted$estimates[1], 
+            ai_results_restricted$estimates[1] - 1.96 * ai_results_restricted$se[1],
+            ai_results_restricted$estimates[1] + 1.96 * ai_results_restricted$se[1]))
+cat(sprintf("β (有利な不平等回避) = %.3f (%.3f, %.3f)\n", 
+            ai_results_restricted$estimates[2],
+            ai_results_restricted$estimates[2] - 1.96 * ai_results_restricted$se[2],
+            ai_results_restricted$estimates[2] + 1.96 * ai_results_restricted$se[2]))
+cat(sprintf("λ (選択の感度) = %.3f (%.3f, %.3f)\n\n", 
+            ai_results_restricted$estimates[3],
+            ai_results_restricted$estimates[3] - 1.96 * ai_results_restricted$se[3],
+            ai_results_restricted$estimates[3] + 1.96 * ai_results_restricted$se[3]))
+
+cat("Control条件:\n")
+cat(sprintf("α (不利な不平等回避) = %.3f (%.3f, %.3f)\n", 
+            control_results_restricted$estimates[1],
+            control_results_restricted$estimates[1] - 1.96 * control_results_restricted$se[1],
+            control_results_restricted$estimates[1] + 1.96 * control_results_restricted$se[1]))
+cat(sprintf("β (有利な不平等回避) = %.3f (%.3f, %.3f)\n", 
+            control_results_restricted$estimates[2],
+            control_results_restricted$estimates[2] - 1.96 * control_results_restricted$se[2],
+            control_results_restricted$estimates[2] + 1.96 * control_results_restricted$se[2]))
+cat(sprintf("λ (選択の感度) = %.3f (%.3f, %.3f)\n\n", 
+            control_results_restricted$estimates[3],
+            control_results_restricted$estimates[3] - 1.96 * control_results_restricted$se[3],
+            control_results_restricted$estimates[3] + 1.96 * control_results_restricted$se[3]))
+
+# Restricted sampleでの条件間の差
+cat("条件間の差（AI - Control）:\n")
+delta_alpha <- ai_results_restricted$estimates[1] - control_results_restricted$estimates[1]
+delta_beta <- ai_results_restricted$estimates[2] - control_results_restricted$estimates[2]
+delta_lambda <- ai_results_restricted$estimates[3] - control_results_restricted$estimates[3]
+
+se_diff_alpha <- sqrt(ai_results_restricted$se[1]^2 + control_results_restricted$se[1]^2)
+se_diff_beta <- sqrt(ai_results_restricted$se[2]^2 + control_results_restricted$se[2]^2)
+se_diff_lambda <- sqrt(ai_results_restricted$se[3]^2 + control_results_restricted$se[3]^2)
+
+z_alpha <- delta_alpha / se_diff_alpha
+z_beta <- delta_beta / se_diff_beta
+z_lambda <- delta_lambda / se_diff_lambda
+
+p_alpha <- 2 * (1 - pnorm(abs(z_alpha)))
+p_beta <- 2 * (1 - pnorm(abs(z_beta)))
+p_lambda <- 2 * (1 - pnorm(abs(z_lambda)))
+
+cat(sprintf("Δα = %.3f (z = %.3f, p = %.3f)%s\n", 
+            delta_alpha, z_alpha, p_alpha,
+            ifelse(p_alpha < 0.05, " *", "")))
+cat(sprintf("Δβ = %.3f (z = %.3f, p = %.3f)%s\n", 
+            delta_beta, z_beta, p_beta,
+            ifelse(p_beta < 0.05, " *", "")))
+cat(sprintf("Δλ = %.3f (z = %.3f, p = %.3f)%s\n\n", 
+            delta_lambda, z_lambda, p_lambda,
+            ifelse(p_lambda < 0.05, " *", "")))
+
+# 3. 主な知見のまとめ
+cat("3. 主な知見のまとめ\n\n")
+
+cat("全サンプルでの分析:\n")
+cat(sprintf("- 不利な不平等への回避度: AI条件が%s（Δα = %.3f, p = %.3f）\n",
+            ifelse(delta_alpha > 0, "高い", "低い"), delta_alpha, p_alpha))
+cat(sprintf("- 有利な不平等への回避度: AI条件が%s（Δβ = %.3f, p = %.3f）\n",
+            ifelse(delta_beta > 0, "高い", "低い"), delta_beta, p_beta))
+cat(sprintf("- 選択の感度: AI条件が%s（Δλ = %.3f, p = %.3f）\n\n",
+            ifelse(delta_lambda > 0, "高い", "低い"), delta_lambda, p_lambda))
+
+cat("Restricted sampleでの分析:\n")
+cat(sprintf("- 不利な不平等への回避度: AI条件が%s（Δα = %.3f, p = %.3f）\n",
+            ifelse(delta_alpha > 0, "高い", "低い"), delta_alpha, p_alpha))
+cat(sprintf("- 有利な不平等への回避度: AI条件が%s（Δβ = %.3f, p = %.3f）\n",
+            ifelse(delta_beta > 0, "高い", "低い"), delta_beta, p_beta))
+cat(sprintf("- 選択の感度: AI条件が%s（Δλ = %.3f, p = %.3f）\n",
+            ifelse(delta_lambda > 0, "高い", "低い"), delta_lambda, p_lambda))
+
+cat("\n注: * は5%水準で統計的に有意な差があることを示す\n")
+
+sink()

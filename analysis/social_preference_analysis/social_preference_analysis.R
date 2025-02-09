@@ -26,7 +26,7 @@ handle_data_loading <- function(file_path) {
 
 # データの読み込み
 # 選択肢データの読み込み
-payoff_scenarios <- handle_data_loading("../../Experiment/payoff_scenarios_analysis.csv") %>%
+payoff_scenarios <- handle_data_loading("../../Experiment/payoffTable.csv") %>%
   mutate(
     # Klockmann et al. (2023)の分類に基づく
     position = Category_2_Position,
@@ -446,39 +446,34 @@ results_df_restricted <- tibble(
 # 結果を結合
 results_df <- bind_rows(results_df, results_df_restricted)
 
-# 結果の表示
-  cat("\n=== 条件間の社会的選好パラメータ比較 ===\n\n")
-  
-  # 各条件のパラメータ推定値と95%信頼区間
-  cat("1. 条件ごとのパラメータ推定値（95%信頼区間）:\n\n")
+# 結果をファイルに出力
+sink("analysis/social_preference_analysis/social_preference_analysis_results.txt")
 
-for (sample in c("All", "Restricted")) {
-  cat(sprintf("\n%sサンプル:\n", sample))
-for (cond in c("AI", "Control")) {
-    cat(sprintf("\n%s条件:\n", cond))
-    cond_data <- results_df %>% 
-      filter(condition == cond, sample_type == sample)
-  
-  if (!any(is.na(cond_data[, c("alpha", "beta", "lambda")]))) {
-      cat(sprintf("α (不利な不平等回避) = %.3f (%.3f, %.3f)\n", 
-               cond_data$alpha,
-               cond_data$alpha - 1.96 * cond_data$alpha_se,
-               cond_data$alpha + 1.96 * cond_data$alpha_se))
-    
-      cat(sprintf("β (有利な不平等回避) = %.3f (%.3f, %.3f)\n", 
-               cond_data$beta,
-               cond_data$beta - 1.96 * cond_data$beta_se,
-               cond_data$beta + 1.96 * cond_data$beta_se))
-    
-      cat(sprintf("λ (選択の感度) = %.3f (%.3f, %.3f)\n", 
-               cond_data$lambda,
-               cond_data$lambda - 1.96 * cond_data$lambda_se,
-               cond_data$lambda + 1.96 * cond_data$lambda_se))
-    } else {
-      cat("パラメータの推定に失敗しました\n")
-    }
-  }
-}
+cat("\n=== 条件間の社会的選好パラメータ比較 ===\n\n")
+cat("1. 条件ごとのパラメータ推定値（95%信頼区間）:\n\n")
+cat("\nAllサンプル:\n\n")
+cat("AI条件:\n")
+cat(sprintf("α (不利な不平等回避) = %.3f (%.3f, %.3f)\n", ai_results$estimates[1], ai_results$se[1], ai_results$se[1] + 1.96 * ai_results$se[1]))
+cat(sprintf("β (有利な不平等回避) = %.3f (%.3f, %.3f)\n", ai_results$estimates[2], ai_results$se[2], ai_results$se[2] + 1.96 * ai_results$se[2]))
+cat(sprintf("λ (選択の感度) = %.3f (%.3f, %.3f)\n\n", ai_results$estimates[3], ai_results$se[3], ai_results$se[3] + 1.96 * ai_results$se[3]))
+
+cat("Control条件:\n")
+cat(sprintf("α (不利な不平等回避) = %.3f (%.3f, %.3f)\n", control_results$estimates[1], control_results$se[1], control_results$se[1] + 1.96 * control_results$se[1]))
+cat(sprintf("β (有利な不平等回避) = %.3f (%.3f, %.3f)\n", control_results$estimates[2], control_results$se[2], control_results$se[2] + 1.96 * control_results$se[2]))
+cat(sprintf("λ (選択の感度) = %.3f (%.3f, %.3f)\n\n", control_results$estimates[3], control_results$se[3], control_results$se[3] + 1.96 * control_results$se[3]))
+
+cat("\nRestrictedサンプル:\n\n")
+cat("AI条件:\n")
+cat(sprintf("α (不利な不平等回避) = %.3f (%.3f, %.3f)\n", ai_results_restricted$estimates[1], ai_results_restricted$se[1], ai_results_restricted$se[1] + 1.96 * ai_results_restricted$se[1]))
+cat(sprintf("β (有利な不平等回避) = %.3f (%.3f, %.3f)\n", ai_results_restricted$estimates[2], ai_results_restricted$se[2], ai_results_restricted$se[2] + 1.96 * ai_results_restricted$se[2]))
+cat(sprintf("λ (選択の感度) = %.3f (%.3f, %.3f)\n\n", ai_results_restricted$estimates[3], ai_results_restricted$se[3], ai_results_restricted$se[3] + 1.96 * ai_results_restricted$se[3]))
+
+cat("Control条件:\n")
+cat(sprintf("α (不利な不平等回避) = %.3f (%.3f, %.3f)\n", control_results_restricted$estimates[1], control_results_restricted$se[1], control_results_restricted$se[1] + 1.96 * control_results_restricted$se[1]))
+cat(sprintf("β (有利な不平等回避) = %.3f (%.3f, %.3f)\n", control_results_restricted$estimates[2], control_results_restricted$se[2], control_results_restricted$se[2] + 1.96 * control_results_restricted$se[2]))
+cat(sprintf("λ (選択の感度) = %.3f (%.3f, %.3f)\n\n", control_results_restricted$estimates[3], control_results_restricted$se[3], control_results_restricted$se[3] + 1.96 * control_results_restricted$se[3]))
+
+sink()
 
 # 結果の可視化
 plot_bootstrap_results <- function(ai_results, control_results, ai_results_restricted, control_results_restricted) {

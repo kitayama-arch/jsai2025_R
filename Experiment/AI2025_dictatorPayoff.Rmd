@@ -18,7 +18,7 @@ library(ggplot2)
 
 ```{r load_and_process_data}
 # CSVデータを読み込む
-data <- read.csv("payoff_scenarios_analysis.csv")
+data <- read.csv("Table.csv")
 
 # Is_Training 列を論理型に変換
 data$Is_Training <- as.logical(data$Is_Training)
