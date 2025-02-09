@@ -7,14 +7,14 @@ library(tidyverse)
 
 # データの読み込み
 # AI条件のデータ
-data_0117_3 <- read_csv("AI2025_data/20250117_3/dictator_app_2025-01-17.csv")
-data_0120_5 <- read_csv("AI2025_data/20250120_5/dictator_app_2025-01-20.csv")
+data_0117_3 <- read_csv("../../AI2025_data/20250117_3/dictator_app_2025-01-17.csv")
+data_0120_5 <- read_csv("../../AI2025_data/20250120_5/dictator_app_2025-01-20.csv")
 # コントロール条件のデータ
-data_0117_4 <- read_csv("AI2025_data/20250117_4/Base_dictator_app_2025-01-17.csv")
-data_0120_4 <- read_csv("AI2025_data/20250120_4/Base_dictator_app_2025-01-20.csv")
+data_0117_4 <- read_csv("../../AI2025_data/20250117_4/Base_dictator_app_2025-01-17.csv")
+data_0120_4 <- read_csv("../../AI2025_data/20250120_4/Base_dictator_app_2025-01-20.csv")
 
 # payoff_scenariosの読み込み（restricted sample判定用）
-payoff_scenarios <- read_csv("Experiment/payoff_scenarios_analysis.csv")
+payoff_scenarios <- read_csv("../../Experiment/payoffTable.csv")
 
 # データクリーニング
 # 実際に参加した参加者のデータのみを抽出

@@ -1,4 +1,4 @@
-Game,Option_X_Dictator,Option_X_Receiver,Option_Y_Dictator,Option_Y_Receiver,Category_Slope,Category_Position,Category_Efficiency,Category_Inequality,Is_Training,is_Restricted
+Game,Option_X_Dictator,Option_X_Receiver,Option_Y_Dictator,Option_Y_Receiver,Category_1_Slope,Category_2_Position,Category_3_Efficiency,Category_4_Inequality,Is_Training,Is_Restricted
 1,910,140,830,520,Selfish,Advantageous,Y,Y,True,True
 2,1010,190,730,470,Selfish,Advantageous,None,Y,True,True
 3,1060,330,680,330,Receiver indiff.,Advantageous,X,Y,True,False

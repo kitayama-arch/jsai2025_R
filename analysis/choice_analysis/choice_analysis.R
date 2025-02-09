@@ -16,6 +16,9 @@ data_0120_5 <- read_csv("../../AI2025_data/20250120_5/dictator_app_2025-01-20.cs
 data_0117_4 <- read_csv("../../AI2025_data/20250117_4/Base_dictator_app_2025-01-17.csv")
 data_0120_4 <- read_csv("../../AI2025_data/20250120_4/Base_dictator_app_2025-01-20.csv")
 
+# payoff_scenariosの読み込み
+payoff_scenarios <- read_csv("../../Experiment/payoffTable.csv")
+
 # データクリーニング
 # 実際に参加した参加者のデータのみを抽出
 data_0117_3_clean <- data_0117_3 %>%
@@ -104,19 +107,6 @@ round_choices <- all_choices %>%
     y_proportion = y_count / total,
     .groups = "drop"
   )
-
-# ファイルの存在確認
-payoff_scenarios_file <- "Experiment/payoff_scenarios_analysis.csv"
-if (!file.exists(payoff_scenarios_file)) {
-  stop(paste("ファイルが見つかりません:", payoff_scenarios_file))
-}
-
-# データ読み込みのエラーハンドリング
-tryCatch({
-  payoff_scenarios <- read_csv(payoff_scenarios_file)
-}, error = function(e) {
-  stop(paste("ファイルの読み込みに失敗しました:", e$message))
-})
 
 # 参加者レベルの分析を追加
 participant_level_analysis <- function(data, scenarios) {
