@@ -306,7 +306,7 @@ estimate_parameters <- function(clean_data) {
 }
 
 # ブートストラップによる標準誤差の推定
-bootstrap_estimates <- function(clean_data, alpha_grid, beta_grid, lambda_grid, n_bootstrap = 100) {
+bootstrap_estimates <- function(clean_data, alpha_grid, beta_grid, lambda_grid, n_bootstrap = 1000) {
   # 参加者のユニークIDを取得
   unique_participants <- unique(clean_data$participant.code)
   

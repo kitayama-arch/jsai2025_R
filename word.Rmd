@@ -1,0 +1,388 @@
+---
+title: "senkyo_word"
+author: "Taito Hirano"
+date: "2024-08-25"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{=html}
+<style>
+table, td, th {
+padding-left: 1em;
+padding-right: 1em;
+min-width: 75%;
+margin-left: auto;
+margin-right: auto;
+margin-top: 1em;
+margin-bottom: 1em;
+}
+table {
+  border-collapse: collapse;
+}
+th, td {
+  border-bottom: 1px solid black; /* 横軸に線を引く */
+  padding: 8px;
+}
+</style>
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = FALSE,
+                      message = FALSE,
+                      comment = "",
+                      fig.align = "center")
+```
+
+```{r load-packages, include=FALSE}
+library(tidyverse)
+library(fastDummies)
+library(gtsummary)
+library(flextable)
+library(modelsummary)
+library(multcomp)
+library(dplyr)
+library(rstatix)
+
+```
+
+```{r data-preprocessing}
+data <- read.csv("senkyo08.csv", comment.char = "#")
+
+colnames(data) <- c("timestamp", "past_election_participation", "sns_usage", "ai_usage", 
+                    "political_interest", "level0", "level0_reason_A", "level0_reason_B", 
+                    "level0_reason_C", "level0_reason_D", "level0_reason_E", "level0_reason_F", 
+                    "level1", "level1_reason_A", "level1_reason_B", "level1_reason_C", 
+                    "level1_reason_D", "level1_reason_E", "level1_reason_F", "level2", 
+                    "level2_reason_A", "level2_reason_B", "level2_reason_C", "level2_reason_D", 
+                    "level2_reason_E", "level2_reason_F", "level2_if_advantage", "level3", 
+                    "level3_reason_A", "level3_reason_B", "level3_reason_C", "level3_reason_D", 
+                    "level3_reason_E", "level3_reason_F", "level3_if_advantage", "other_comments", 
+                    "age", "gender", "check", "occupation", "residence", "feedback")
+
+data <- dummy_cols(data, select_columns = c("sns_usage", "past_election_participation", "ai_usage"),
+                   remove_first_dummy = TRUE, remove_selected_columns = TRUE)
+
+names(data)[names(data) == "sns_usage_月に数回利用する"] <- "sns_usage_monthly"
+names(data)[names(data) == "sns_usage_週に2,3回利用する"] <- "sns_usage_weekly"
+names(data)[names(data) == "sns_usage_ほぼ毎日利用する"] <- "sns_usage_daily"
+names(data)[names(data) == "past_election_participation_ほとんどの選挙に参加している"] <- "election_most"
+names(data)[names(data) == "past_election_participation_時々参加している"] <- "election_sometimes"
+names(data)[names(data) == "past_election_participation_まれに参加している"] <- "election_rarely"
+names(data)[names(data) == "past_election_participation_一度も参加したことがない"] <- "election_never"
+names(data)[names(data) == "ai_usage_週に2,3回利用する"] <- "ai_usage_weekly"
+names(data)[names(data) == "ai_usage_月に数回利用する"] <- "ai_usage_monthly"
+names(data)[names(data) == "ai_usage_ほぼ毎日利用する"] <- "ai_usage_daily"
+
+data <- data[, !(names(data) %in% c("feedback", "check", "other_comments", "residence", "gender", "timestamp", "occupation"))]
+```
+
+```{r summary-statistics, results='asis'}
+summary_data <- data %>% 
+  get_summary_stats(
+    level0, level0_reason_A, level0_reason_B, level0_reason_C,
+    level0_reason_D, level0_reason_E, level0_reason_F, level1, level1_reason_A,
+    level1_reason_B, level1_reason_C, level1_reason_D, level1_reason_E,
+    level1_reason_F, level2, level2_reason_A, level2_reason_B, level2_reason_C,
+    level2_reason_D, level2_reason_E, level2_reason_F, level2_if_advantage, level3,
+    level3_reason_A, level3_reason_B, level3_reason_C, level3_reason_D, level3_reason_E,
+    level3_reason_F, level3_if_advantage, age, political_interest,  sns_usage_daily, sns_usage_monthly,
+    sns_usage_weekly, ai_usage_daily, ai_usage_monthly, ai_usage_weekly, election_most, election_rarely, election_never,
+    election_sometimes,
+    type = "common"
+  )
+
+summary_data <- summary_data %>%
+    select(variable, mean, sd, min, max, n)
+
+sum <-
+  summary_data %>%
+  regulartable() %>%
+  autofit() %>%
+  add_footer(., variable = "* 基準カテゴリ:SNS利用頻度(ほとんど利用していない),  AI利用頻度(ほとんど利用していない),  選挙参加(一度もない)", top = F) %>%
+  merge_at(., i = 1, j = 1:ncol(summary_data), part = "footer") %>%
+    add_header(., variable = "表1. 記述統計表", top = T) %>%
+    merge_at(., i = 1, j = 1:ncol(summary_data), part = "header") %>%
+    align(., i = 1, j = 1:ncol(summary_data), align = "center", part = "header")
+
+variable_labels <- c(
+  "level0" = "レベル0",
+  "level0_reason_A" = "レベル0理由A",
+  "level0_reason_B" = "レベル0理由B",
+  "level0_reason_C" = "レベル0理由C",
+  "level0_reason_D" = "レベル0理由D",
+  "level0_reason_E" = "レベル0理由E",
+  "level0_reason_F" = "レベル0理由F",
+  "level1" = "レベル1",
+  "level1_reason_A" = "レベル1理由A",
+  "level1_reason_B" = "レベル1理由B",
+  "level1_reason_C" = "レベル1理由C",
+  "level1_reason_D" = "レベル1理由D",
+  "level1_reason_E" = "レベル1理由E",
+  "level1_reason_F" = "レベル1理由F",
+  "level2" = "レベル2",
+  "level2_reason_A" = "レベル2理由A",
+  "level2_reason_B" = "レベル2理由B",
+  "level2_reason_C" = "レベル2理由C",
+  "level2_reason_D" = "レベル2理由D",
+  "level2_reason_E" = "レベル2理由E",
+  "level2_reason_F" = "レベル2理由F",
+  "level2_if_advantage" = "レベル2の利点",
+  "level3" = "レベル3",
+  "level3_reason_A" = "レベル3理由A",
+  "level3_reason_B" = "レベル3理由B",
+  "level3_reason_C" = "レベル3理由C",
+  "level3_reason_D" = "レベル3理由D",
+  "level3_reason_E" = "レベル3理由E",
+  "level3_reason_F" = "レベル3理由F",
+  "level3_if_advantage" = "レベル3の利点",
+  "age" = "年齢",
+  "political_interest" = "政治関心",
+  "sns_usage_daily" = "SNS利用頻度(毎日)",
+  "sns_usage_monthly" = "SNS利用頻度(毎月)",
+  "sns_usage_weekly" = "SNS利用頻度(毎週)",
+  "ai_usage_daily" = "AI利用頻度(毎日)",
+  "ai_usage_monthly" = "AI利用頻度(毎月)",
+  "ai_usage_weekly" = "AI利用頻度(毎週)",
+  "election_most" = "選挙参加(ほとんど)",
+  "election_rarely" = "選挙参加(まれに)",
+  "election_never" = "選挙参加(一度もない)",
+  "election_sometimes" = "選挙参加(時々)"
+)
+
+# `labelizor` 関数で variable 列のラベルを変更
+sum <- sum %>% 
+  labelizor(
+    j = "variable", 
+    labels = variable_labels 
+  )
+
+print(sum, preview = "docx")
+```
+
+```{r regression-models, results='asis'}
+# レベル別許容度と各変数の重回帰分析
+# ***: p値 < 0.001 (0.1%未満)
+# **: p値 < 0.01 (1%未満)
+# *: p値 < 0.05 (5%未満)
+
+model_level0 <- lm(level0 ~ age + political_interest + sns_usage_monthly + sns_usage_weekly + sns_usage_daily + 
+                     ai_usage_monthly + ai_usage_weekly + ai_usage_daily + election_most + election_sometimes + election_rarely + election_never,
+                   data = data)
+model_level1 <- lm(level1 ~ age + political_interest + sns_usage_monthly + sns_usage_weekly + sns_usage_daily + 
+                     ai_usage_monthly + ai_usage_weekly + ai_usage_daily + election_most + election_sometimes + election_rarely + election_never,
+                   data = data)
+model_level2 <- lm(level2 ~ age + political_interest + sns_usage_monthly + sns_usage_weekly + sns_usage_daily + 
+                     ai_usage_monthly + ai_usage_weekly + ai_usage_daily + election_most + election_sometimes + election_rarely + election_never,
+                   data = data)
+model_level3 <- lm(level3 ~ age + political_interest + sns_usage_monthly + sns_usage_weekly + sns_usage_daily + 
+                     ai_usage_monthly + ai_usage_weekly + ai_usage_daily + election_most + election_sometimes + election_rarely + election_never,
+                   data = data)
+
+tab1 <- 
+  msummary(list("Level 0" = model_level0, "Level 1" = model_level1, "Level 2" = model_level2, "Level 3" = model_level3),
+         output = 'flextable',
+         stars = TRUE,
+         title = "表2. レベルと各要因の重回帰",
+         coef_map = c("age" = "年齢",
+                      "political_interest" = "政治関心",
+                      "sns_usage_monthly" = "SNS利用頻度 (月に数回) (vs. ほとんど利用していない)",
+                      "sns_usage_weekly" = "SNS利用頻度 (週に2,3回) (vs. ほとんど利用していない)",
+                      "sns_usage_daily" = "SNS利用頻度 (ほぼ毎日) (vs. ほとんど利用していない)",
+                      "ai_usage_monthly" = "AI利用頻度 (月に数回) (vs. ほとんど利用していない)",
+                      "ai_usage_weekly" = "AI利用頻度 (週に2,3回) (vs. ほとんど利用していない)",
+                      "ai_usage_daily" = "AI利用頻度 (ほぼ毎日) (vs. ほとんど利用していない)",
+                      "election_most" = "選挙参加 (ほとんど) (vs. すべて参加している)",
+                      "election_sometimes" = "選挙参加 (時々) (vs. すべて参加している)",
+                      "election_rarely" = "選挙参加 (まれに) (vs. すべて参加している)",
+                      "election_never" = "選挙参加 (一度もない) (vs. すべて参加している)"),
+         gof_omit = "AIC|BIC|Log.Lik.",
+         escape = FALSE,
+         #notes = '基準カテゴリ:SNS利用頻度(ほとんど利用していない),  AI利用頻度(ほとんど利用していない),  選挙参加(すべての選挙に参加している)'
+  )
+
+tab1 %>%
+  autofit() 
+
+print(tab1, preview = "docx")
+```
+
+```{r reason-regression-models, results='asis'}
+# レベルの理由別と各変数の重回帰分析
+
+levels <- c("level0", "level1", "level2", "level3")
+reasons <- list(
+  level0 = c("level0_reason_A", "level0_reason_B", "level0_reason_C", "level0_reason_D", "level0_reason_E", "level0_reason_F"),
+  level1 = c("level1_reason_A", "level1_reason_B", "level1_reason_C", "level1_reason_D", "level1_reason_E", "level1_reason_F"),
+  level2 = c("level2_reason_A", "level2_reason_B", "level2_reason_C", "level2_reason_D", "level2_reason_E", "level2_reason_F"),
+  level3 = c("level3_reason_A", "level3_reason_B", "level3_reason_C", "level3_reason_D", "level3_reason_E", "level3_reason_F")
+)
+
+reason_labels <- list(
+  level0 = c(
+    "A: 紙媒体から情報を得ることに慣れているから",
+    "B: ポスターとチラシは選挙法で厳しく規制されており、信頼できるから",
+    "C: セキュリティ・プライバシー面で安心だから",
+    "D: ポスターとチラシだけでは、候補者の詳細な情報や政策が十分に伝わりにくいから",
+    "E: SNSやインターネットを利用した方が、情報をより早く入手できるから",
+    "F: 場所によってはポスターや街頭演説が目に入りにくく、チラシも気づかないと情報を得られないから"
+  ),
+  level1 = c(
+    "A: 街頭演説よりも手軽だから",
+    "B: 日頃から情報を簡単に手に入れることが出来るから",
+    "C: SNSの使用率が特に高い若者の政治参加が簡単だから",
+    "D: 一度調べた関連情報などで偏った情報が流れてきそうだから",
+    "E: SNSを使って投票率が上がったとしても、その候補者が政治的に評価されたとは限らないから",
+    "F: 高齢者などSNSにあまり触れない人との情報格差ができるから"
+  ),
+  level2 = c(
+    "A: 情報が整理され理解しやすいから",
+    "B: 政治知識が乏しくても自分の思想に合致した候補者を選べるから",
+    "C: デジタル化に興味がある層の政治関心が高まるから",
+    "D: 情報の入手量の格差が生まれるから",
+    "E: 政治知識が身につかなくなるから",
+    "F: AIが適切に提案しない可能性があるから"
+  ),
+  level3 = c(
+    "A: AIの公平性・客観性が参考になると思うから",
+    "B: 選挙が効率化されると思うから",
+    "C: AIによるモニタリングで、選挙活動の透明性が高まると思うから",
+    "D: AIによる管理で候補者のメッセージが伝わらない気がするから",
+    "E: 技術的な問題やエラーによる誤った判断が行われるリスクがあるから",
+    "F: AIが偏ったデータに基づく判断をする可能性があるから"
+  )
+)
+
+# 各レベルごとに表を作成
+for (level in levels) {
+  # 各レベルの理由別にモデルを作成
+  model_list <- list()
+  for (i in 1:length(reasons[[level]])) {
+    reason <- reasons[[level]][i]
+    formula <- as.formula(paste(reason, "~ age + political_interest + sns_usage_monthly + sns_usage_weekly + sns_usage_daily + ai_usage_monthly + ai_usage_weekly + ai_usage_daily + election_all + election_most + election_sometimes + election_rarely"))
+    model_name <- paste(level, reason, sep = "_")
+    model_list[[reason_labels[[level]][i]]] <- lm(formula, data = data)
+  }
+  
+tab2 <-
+   msummary(model_list,
+             stars = TRUE,
+             coef_map = c(
+                "age" = "年齢",
+                "political_interest" = "政治関心",
+                "sns_usage_monthly" = "SNS利用頻度 (月に数回) (vs. ほとんど利用していない)",
+                "sns_usage_weekly" = "SNS利用頻度 (週に2,3回) (vs. ほとんど利用していない)",
+                "sns_usage_daily" = "SNS利用頻度 (ほぼ毎日) (vs. ほとんど利用していない)",
+                "ai_usage_monthly" = "AI利用頻度 (月に数回) (vs. ほとんど利用していない)",
+                "ai_usage_weekly" = "AI利用頻度 (週に2,3回) (vs. ほとんど利用していない)",
+                "ai_usage_daily" = "AI利用頻度 (ほぼ毎日) (vs. ほとんど利用していない)",
+                "election_all" = "選挙参加 (すべて) (vs. 一度もない)",
+                "election_most" = "選挙参加 (ほとんど) (vs. 一度もない)",
+                "election_sometimes" = "選挙参加 (時々) (vs. 一度もない)",
+                "election_rarely" = "選挙参加 (まれに) (vs. 一度もない)"),
+             gof_omit = "AIC|BIC|Log.Lik.",
+         escape = FALSE,
+         title = paste("Level", substr(level, 6, 6), "の理由別重回帰分析結果")
+  )
+tab2 %>%
+  autofit() 
+
+print(tab2, preview = "docx")
+}
+```
+
+```{r}
+
+
+levels_data <- data %>%
+    dplyr::select(level0, level1, level2, level3)
+
+level_summary <- levels_data %>%
+    summarise(
+        level0_mean = mean(level0, na.rm = TRUE),
+        level1_mean = mean(level1, na.rm = TRUE),
+        level2_mean = mean(level2, na.rm = TRUE),
+        level3_mean = mean(level3, na.rm = TRUE),
+        level0_n = sum(!is.na(level0)),
+        level1_n = sum(!is.na(level1)),
+        level2_n = sum(!is.na(level2)),
+        level3_n = sum(!is.na(level3))
+    )
+
+level_df <- data.frame(
+    level = factor(rep(c("Level 0", "Level 1", "Level 2", "Level 3"), each = nrow(data))),
+    score = c(rep(level_summary$level0_mean, level_summary$level0_n),
+              rep(level_summary$level1_mean, level_summary$level1_n),
+              rep(level_summary$level2_mean, level_summary$level2_n),
+              rep(level_summary$level3_mean, level_summary$level3_n))
+)
+
+anova_result <- aov(score ~ level, data = level_df)
+
+summary(anova_result)
+       
+TukeyHSD(anova_result)
+
+level_summary <- levels_data %>%
+  summarise(
+    level0_mean = mean(level0, na.rm = TRUE),
+    level1_mean = mean(level1, na.rm = TRUE),
+    level2_mean = mean(level2, na.rm = TRUE),
+    level3_mean = mean(level3, na.rm = TRUE),
+    level0_sd = sd(level0, na.rm = TRUE),  
+    level1_sd = sd(level1, na.rm = TRUE),  
+    level2_sd = sd(level2, na.rm = TRUE),  
+    level3_sd = sd(level3, na.rm = TRUE),  
+    level0_n = sum(!is.na(level0)),
+    level1_n = sum(!is.na(level1)),
+    level2_n = sum(!is.na(level2)),
+    level3_n = sum(!is.na(level3))
+  )
+
+level_mean_sd <- data.frame(
+  level = factor(c("Level 0", "Level 1", "Level 2", "Level 3")),  
+  mean = c(level_summary$level0_mean, level_summary$level1_mean, level_summary$level2_mean, level_summary$level3_mean),
+  sd = c(level_summary$level0_sd, level_summary$level1_sd, level_summary$level2_sd, level_summary$level3_sd),
+  n = c(level_summary$level0_n, level_summary$level1_n, level_summary$level2_n, level_summary$level3_n)
+)
+
+errors <- aes(ymax = mean + sd, ymin = mean - sd)
+
+# Tukeyからp値を抜き出す
+res <- lm(score ~  level, d = level_df)
+tukey_res <- glht(res, linfct=mcp(level="Tukey"))
+mltv = cld(tukey_res, decreasing=F)
+annos = mltv[["mcletters"]][["Letters"]]
+
+plot <- 
+  ggplot(level_mean_sd, aes(x = level, y = mean)) +
+   geom_bar(stat = "identity",
+          fill = "#0369a1",  #統計処理しない数値を使用
+          position = "dodge"
+          ) + 
+  geom_errorbar(errors, width = 0.2, color = "black") +  # エラーバーを黒色
+  stat_summary(geom = 'text', label = annos,  vjust = -10) + #有意差
+  scale_y_continuous(expand = c(0,0), limits = c(0,6)) +
+  labs(title = NULL, x = NULL, y = "許容度") +
+  theme_gray(base_family = "Noto Sans JP") +
+  theme(
+    panel.background = element_blank(),  # 背景を消す
+    panel.grid.major = element_blank(),  # メジャーグリッド線を消す
+    panel.grid.minor = element_blank(),  # マイナーグリッド線を消す
+    axis.line = element_line(color = "black"), 
+    axis.title.y = element_text(size = 16),
+    axis.text.x = element_text(size = 15),
+    axis.text.y = element_text(size = 15),
+    plot.title = element_text(size = 20, face = "bold"),
+    legend.position = "bottom"
+  )
+
+ggsave(filename = "figureNw.png", 
+       plot = plot, 
+       device = "png", 
+       scale = 1, 
+       width = 5, height = 5, 
+       units = c("in"),
+       dpi = 1500) # 画像を保存
+```

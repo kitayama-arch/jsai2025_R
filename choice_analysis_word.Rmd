@@ -1,0 +1,167 @@
+---
+title: "選択行動の分析結果"
+author: "Taito Hirano"
+date: "`r format(Sys.time(), '%Y-%m-%d')`"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{=html}
+<style>
+table, td, th {
+padding-left: 1em;
+padding-right: 1em;
+min-width: 75%;
+margin-left: auto;
+margin-right: auto;
+margin-top: 1em;
+margin-bottom: 1em;
+}
+table {
+  border-collapse: collapse;
+}
+th, td {
+  border-bottom: 1px solid black;
+  padding: 8px;
+}
+</style>
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = FALSE,
+                      message = FALSE,
+                      comment = "",
+                      fig.align = "center")
+```
+
+```{r load-packages, include=FALSE}
+library(tidyverse)
+library(gtsummary)
+library(flextable)
+library(modelsummary)
+library(dplyr)
+library(rstatix)
+```
+
+```{r data-preprocessing}
+# データの読み込み
+# AI条件のデータ
+data_0117_3 <- read_csv("AI2025_data/20250117_3/dictator_app_2025-01-17.csv")
+data_0120_5 <- read_csv("AI2025_data/20250120_5/dictator_app_2025-01-20.csv")
+# コントロール条件のデータ
+data_0117_4 <- read_csv("AI2025_data/20250117_4/Base_dictator_app_2025-01-17.csv")
+data_0120_4 <- read_csv("AI2025_data/20250120_4/Base_dictator_app_2025-01-20.csv")
+
+# payoff_scenariosの読み込み
+payoff_scenarios <- read_csv("Experiment/payoffTable.csv")
+
+# データクリーニング
+# 実際に参加した参加者のデータのみを抽出
+data_0117_3_clean <- data_0117_3 %>%
+  filter(participant.visited == 1)
+
+data_0120_5_clean <- data_0120_5 %>%
+  filter(participant.visited == 1)
+
+# ベースライン条件ではラウンド16を除外
+data_0117_4_clean <- data_0117_4 %>%
+  filter(participant.visited == 1) %>%
+  filter(subsession.round_number != 16)
+
+data_0120_4_clean <- data_0120_4 %>%
+  filter(participant.visited == 1) %>%
+  filter(subsession.round_number != 16)
+
+# データの統合
+all_data <- bind_rows(
+  data_0117_3_clean %>% mutate(condition = "AI"),
+  data_0120_5_clean %>% mutate(condition = "AI"),
+  data_0117_4_clean %>% mutate(condition = "Control"),
+  data_0120_4_clean %>% mutate(condition = "Control")
+)
+
+# 制限サンプルの作成
+restricted_data <- all_data %>%
+  mutate(
+    is_training = TRUE,
+    Game = subsession.round_number
+  ) %>%
+  left_join(
+    payoff_scenarios %>% 
+      select(Game, Is_Training, Category_1_Slope),
+    by = c("Game" = "Game",
+           "is_training" = "Is_Training")
+  ) %>%
+  filter(Category_1_Slope == "Selfish")
+```
+
+```{r analysis-table, results='asis'}
+# 全サンプルの分析
+full_sample_stats <- all_data %>%
+  group_by(condition) %>%
+  summarise(
+    n = n(),
+    x_proportion = mean(player.choice == "X"),
+    se = sqrt((x_proportion * (1 - x_proportion)) / n)
+  )
+
+# 制限サンプルの分析
+restricted_sample_stats <- restricted_data %>%
+  group_by(condition) %>%
+  summarise(
+    restricted_n = n(),
+    restricted_x_proportion = mean(player.choice == "X"),
+    restricted_se = sqrt((restricted_x_proportion * (1 - restricted_x_proportion)) / restricted_n)
+  )
+
+# 全サンプルのt検定
+t_test_full <- t.test(player.choice == "X" ~ condition, data = all_data)
+
+# 制限サンプルのt検定
+t_test_restricted <- t.test(player.choice == "X" ~ condition, data = restricted_data)
+
+# 結果をデータフレームにまとめる
+results_df <- data.frame(
+  Treatments = c("Baseline", "AI"),
+  n = c(
+    full_sample_stats$n[full_sample_stats$condition == "Control"],
+    full_sample_stats$n[full_sample_stats$condition == "AI"]
+  ),
+  Option_X = c(
+    sprintf("%.3f", full_sample_stats$x_proportion[full_sample_stats$condition == "Control"]),
+    sprintf("%.3f", full_sample_stats$x_proportion[full_sample_stats$condition == "AI"])
+  ),
+  p_values = c(
+    "",
+    sprintf("%.3f", t_test_full$p.value)
+  ),
+  Option_X_Restricted = c(
+    sprintf("%.3f", restricted_sample_stats$restricted_x_proportion[restricted_sample_stats$condition == "Control"]),
+    sprintf("%.3f", restricted_sample_stats$restricted_x_proportion[restricted_sample_stats$condition == "AI"])
+  ),
+  p_values_restricted = c(
+    "",
+    sprintf("%.3f", t_test_restricted$p.value)
+  )
+)
+
+# 表の作成
+results_table <- flextable(results_df) %>%
+  set_header_labels(
+    Treatments = "Treatments",
+    n = "# Obs.",
+    Option_X = "Option X",
+    p_values = "p-values",
+    Option_X_Restricted = "Option X",
+    p_values_restricted = "p-values"
+  ) %>%
+  add_header_row(
+    values = c("", "", "全サンプル", "", "制限サンプル", ""),
+    colwidths = c(1, 1, 1, 1, 1, 1)
+  ) %>%
+  theme_box() %>%
+  autofit()
+
+print(results_table, preview = "docx")
+``` 
