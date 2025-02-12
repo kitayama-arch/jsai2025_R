@@ -131,12 +131,57 @@ model_lm <- lm(
   data = all_data
 )
 
+# 交互作用を含むモデル
+model_interaction <- lm(
+  player.payoff ~ player.selfish_preference * condition + 
+    player.equality_preference * condition + 
+    player.efficiency_preference * condition + 
+    player.competitive_preference * condition + 
+    player.gender + player.age,
+  data = all_data
+)
+
 cat("\n## 2. 選好と報酬額の関係性分析\n")
-cat("### 2.1 モデル概要\n")
+cat("### 2.1 基本モデル概要\n")
 print(summary(model_lm))
 
-cat("\n### 2.2 多重共線性チェック\n")
+cat("\n### 2.2 交互作用モデル概要\n")
+print(summary(model_interaction))
+
+cat("\n### 2.3 多重共線性チェック\n")
 print(vif(model_lm))
+print(vif(model_interaction))
+
+# 交互作用の可視化
+interaction_plots <- list()
+
+# 各選好タイプについて交互作用プロットを作成
+preference_vars <- c(
+  "player.selfish_preference" = "利己的選好",
+  "player.equality_preference" = "平等性選好",
+  "player.efficiency_preference" = "効率性選好",
+  "player.competitive_preference" = "競争的選好"
+)
+
+for (var in names(preference_vars)) {
+  interaction_plots[[var]] <- ggplot(all_data, 
+    aes_string(x = var, y = "player.payoff", color = "condition")) +
+    geom_point(alpha = 0.1) +
+    geom_smooth(method = "lm", se = TRUE) +
+    labs(
+      x = paste0(preference_vars[var], " (標準化)"),
+      y = "報酬額",
+      title = paste0(preference_vars[var], "と条件の交互作用"),
+      color = "条件"
+    ) +
+    theme_minimal() +
+    theme(text = element_text(family = "HiraKakuProN-W3"))
+}
+
+# 交互作用プロットの保存
+ggsave("preference_condition_interactions.png", 
+       arrangeGrob(grobs = interaction_plots, ncol = 2), 
+       width = 15, height = 12)
 
 cat("\n## 3. 分析結果の解釈\n\n")
 
