@@ -9,3 +9,6 @@ Rplots.pdf
 *_files/
 *.rds
 workspace.RData
+
+# データディレクトリを除外
+AI2025_data/
