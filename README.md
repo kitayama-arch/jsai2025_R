@@ -43,7 +43,7 @@ AI技術の進歩により、人間の行動データが機械学習のために
 jsai2025_R/
 ├── README.md                          # プロジェクト概要・使用方法
 ├── .gitignore                         # Git除外設定
-├── word.Rmd                          # メイン分析レポート
+├── word.Rmd                          # 論文用の図表作成
 ├── analysis/                          # 分析スクリプト集
 │   ├── choice_analysis/              # 選択行動分析
 │   ├── payoff_avg_analysis/          # 報酬分析  
