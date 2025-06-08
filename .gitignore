@@ -12,3 +12,12 @@ workspace.RData
 
 # データディレクトリを除外
 AI2025_data/
+
+# 参加者情報が含まれる可能性のあるファイルを除外
+*.log
+*results*.txt
+*results*.md
+analysis_output*.log
+analysis_results.txt
+choice_analysis_results.*
+payoff_analysis_results.*
