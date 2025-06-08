@@ -1,380 +1,157 @@
-# AI2025実験分析
+# 行動経済学実験の統計分析
 
-社会的選好と選択行動の分析結果
+R言語を用いた行動経済学実験データの統計分析プロジェクト
 
-## リポジトリ構造
+## 概要
+
+このリポジトリは、**日本人工知能学会第39回全国大会（JSAI2025）**で発表した論文「**行動がAIに学習されると知ったとき，人はどう変わるのか―向社会性の変化に関する実証研究―**」のデータ分析コードを含んでいます。
+
+### 研究背景
+AI技術の進歩により、人間の行動データが機械学習のために収集・分析される機会が増加しています。本研究では、自分の行動がAIに学習されることを知った参加者の社会的選好（向社会性）がどのように変化するかを、独裁者ゲーム実験を通じて実証的に検証しました。
+
+### 研究手法
+分析手法は **Klockmann, Schenk-Hoppe, and Villeval (2022)** の先駆的研究を基礎とし、Fehr-Schmidtモデルによる社会的選好の定量化を中心とした包括的な統計分析を実施しています。
+
+## 技術スタック
+
+- **言語**: R (>= 4.0.0)
+- **コアパッケージ**: 
+  - `tidyverse`: データ操作、パイプライン処理、基本可視化
+  - `lme4`: 線形混合効果モデル、階層モデル
+  - `ggplot2`: 高度なデータ可視化（tidyverseに含まれるが独立して重要）
+  - `stats`: 基本統計解析、回帰分析
+- **統計・モデリング**:
+  - `car`: 回帰診断、VIF計算、Anova
+  - `emmeans`: 周辺平均、多重比較
+  - `optimx`: 最適化アルゴリズム、パラメータ推定
+  - `rstatix`: パイプライン対応統計解析
+  - `effectsize`: 効果量計算
+- **可視化・レポート**:
+  - `viridis`: カラーユニバーサルデザイン対応パレット
+  - `gridExtra`, `patchwork`: 複数プロット配置
+  - `sjPlot`: モデル結果の可視化
+  - `knitr`, `rmarkdown`: 動的レポート生成
+- **専門分析**:
+  - `cluster`, `factoextra`: クラスタ分析
+  - `corrplot`, `psych`: 相関・心理統計分析
+  - `rpart`, `rpart.plot`: 決定木分析
+  - `performance`: モデル診断・評価
+
+## プロジェクト構造
 
 ```
-AI2025_R/
-├── README.md                          # このファイル
+jsai2025_R/
+├── README.md                          # プロジェクト概要・使用方法
 ├── .gitignore                         # Git除外設定
-├── analysis/                          # 分析ファイル
+├── word.Rmd                          # メイン分析レポート
+├── analysis/                          # 分析スクリプト集
+│   ├── choice_analysis/              # 選択行動分析
+│   ├── payoff_avg_analysis/          # 報酬分析  
+│   ├── social_preference_analysis/   # 社会的選好分析
+│   ├── payoff_preference_analysis/   # 選好と行動の整合性分析
 │   ├── altruism_analysis/            # 利他性要因分析
-│   ├── choice_analysis/              # 条件間の比の検定
-│   ├── payoff_avg_analysis/          # 条件間の平均の差の分析
-│   ├── payoff_preference_analysis/   # 選好の自己評価と実際の行動の整合性分析
-│   ├── socialPreference_analysis/    # 社会的選好分析
-│   └── time_analysis/                # 条件と所要時間の分析
-├── document/                          # 分析結果
-└── AI2025_data/                      # 実験データ
-    ├── 20250117_3/                   # AI条件（1回目）
-    ├── 20250117_4/                   # コントロール条件（1回目）
-    ├── 20250120_4/                   # コントロール条件（2回目）
-    └── 20250120_5/                   # AI条件（2回目）
+│   ├── time_analysis/                # 意思決定時間分析
+│   ├── choice_reason_analysis/       # 選択理由分析
+│   └── lamda_genin/                  # 選択感度要因分析
+├── document/                          # 分析結果・ドキュメント
+│   ├── Result.md                     # 分析結果サマリー
+│   └── doc_parameta                  # パラメータ設定
+├── Experiment/                        # 実験設計ファイル
+│   └── payoffTable.csv               # 報酬表・シナリオ設定
+├── Research/                          # 研究関連資料
+└── AI2025_data/                      # 実験データ（非公開）
+    ├── 20250117_3/                   # AI条件（第1回）
+    ├── 20250117_4/                   # コントロール条件（第1回）
+    ├── 20250120_4/                   # コントロール条件（第2回）
+    └── 20250120_5/                   # AI条件（第2回）
 ```
-
-# 2. 実験データ詳細　（AI→dictator_app, 基本→Base_dictator_app）
-
-各ラウンドの決定を配列として記録：
-- round_number: ラウンド番号
-- choice: 選択（'X' or 'Y'）
-- payoff_dictator: A役の報酬
-- payoff_receiver: B役の報酬
-- scenario: 選択肢の内容
-  - x: [Option_X_Dictator, Option_X_Receiver]
-  - y: [Option_Y_Dictator, Option_Y_Receiver]
-
-# 3. アンケートデータ（questionnaire_app）
-
-## 3.1 基本情報
-- gender: 性別（1:男性, 2:女性, 3:その他, 4:回答しない）
-- age: 年齢（18-100歳）
-- gakubu: 学部（1:商学部 ～ 19:その他）
-- gakunen: 学年（1:学部1年次 ～ 7:博士後期課程）
-- feedback: 実験の感想（自由記述、任意）
-
-## 3.2 AIに関する評価（各7段階評価）
-- ai_satisfaction: AI満足度（1:全く満足していない ～ 7:非常に満足している）
-- ai_understanding: AI理解度（1:全く理解できなかった ～ 7:十分理解できた）
-- prediction_accuracy: 予測精度（1:全く一致していなかった ～ 7:完全に一致していた）
-- rf_understanding: ランダムフォレスト理解（1:全く理解できなかった ～ 7:十分理解できた）
-- tech_trust: テクノロジー信頼度（1:全く信頼していない ～ 7:非常に信頼している）
-
-## 3.3 選好に関する自己評価（各7段階評価）
-- selfish_preference: 利己的選好（1:全く重視しなかった ～ 7:非常に重視した）
-- equality_preference: 平等選好（1:全く重視しなかった ～ 7:非常に重視した）
-- efficiency_preference: 効率性選好（1:全く重視しなかった ～ 7:非常に重視した）
-- competitive_preference: 競争的選好（1:全く重視しなかった ～ 7:非常に重視した）
-
-## 3.4 報酬関連データ
-- selected_dictator_round: 選ばれたディクテーターゲームのラウンド
-- selected_dictator_payoff: 選ばれたディクテーターゲームの報酬
-- ai_prediction_payoff: AI予測による報酬
-- final_total_payoff: 最終的な合計報酬
-
 
 ## 分析内容
 
-1. **条件間の比の検定** (`choice_analysis/choice_analysis.R`)
-   - 使用変数：`player.choice`（X/Y選択）
-   - 分析内容：
-     - AI条件とコントロール条件での選択比率（特にY選択）の比較
-     - コンティンジェンシー表による比率の差の検定
-     - 日付別（2025-01-17, 2025-01-20）のデータを統合して分析
-   - データ処理：
-     - 参加者フィルタリング（`participant.visited == 1`）
-     - コントロール条件の16ラウンド目を除外
-     - 選択データの抽出と統合（`bind_rows`による日付別データの結合）
+### 1. 選択行動分析 (`choice_analysis/`)
+- **主要分析**: AI条件とコントロール条件でのY選択比率の比較
+- **統計手法**: カイ二乗検定、t検定（参加者レベル）
+- **追加分析**: 
+  - 制限サンプル分析（利害対立ケースのみ）
+  - ラウンド別選択パターンの可視化
+  - 参加者レベルでの選択比率分析
 
-2. **社会的選好分析** (`socialPreference_analysis/socialPreference_analysis.R`)
-   - **使用変数**:
-     - 主要変数:
-       - `player.payoff_dictator`, `player.payoff_receiver`（報酬額）
-       - `s`（受け手有利の不平等: receiver - dictator）
-       - `r`（独裁者有利の不平等: dictator - receiver）
-     - 制御変数:
-       - `gender`, `age`, `equality_preference`（アンケートデータ）
-       - `condition`（AI/Control）
-       - `round_number`（学習効果調整）
+### 2. 社会的選好分析 (`social_preference_analysis/`)
+- **理論モデル**: Fehr-Schmidtモデルに基づく不平等回避選好の推定
+- **パラメータ**: α（不利な不平等回避）、β（有利な不平等回避）、λ（選択感度）
+- **分析手法**: 最尤推定法、混合効果モデル
+- **追加要素**:
+  - **Klockmann et al.(2022)の制限サンプル分析**: 利害対立ケースに限定した頑健性検証
+  - 立場別（有利・不利・混合）の利己選択率分析
+  - ブートストラップ法による頑健性検証
 
-   - **分析内容**:
-     1. Fehr-Schmidtモデルに基づく効用関数の最尤推定:
-        ```math
-        U(x) = x_D - α・max{x_R - x_D, 0} - β・max{x_D - x_R, 0}
-        ```
-        ここでα: 不利な不平等回避, β: 有利な不平等回避
-     2. 条件間パラメータ比較（AI vs Control）:
-        - 混合効果モデルでα, βの条件間差を検定
-        - 尤度比検定によるモデル比較
+### 3. 報酬分析 (`payoff_avg_analysis/`)
+- **基本統計**: 条件別の平均報酬額と分散の計算
+- **統計検定**: Welchのt検定による条件間差異の検定
+- **可視化**: 箱ひげ図、密度プロット
 
-   - **理論的意義**:
-     - AI介入が不平等回避選好に与える影響の定量化
-     - 実験室測定された社会的選好と宣言的選好の乖離分析
-     - 文化比較研究（日本vs欧米）への知見提供
+### 4. 選好と報酬の関係分析 (`payoff_preference_analysis/`)
+- **目的**: 自己申告選好（利己性、平等性、効率性、競争性）と実際の報酬額の関係
+- **統計手法**: 線形回帰分析、混合効果モデル
+- **交互作用**: 選好×条件の交互作用効果の検証
+- **多重共線性**: VIF（分散膨張因子）による診断
 
-   - **分析ステップ**:
-     1. データ前処理:
-        - 不平等指標の絶対値変換（対数正規分布対応）
-        - 選択データとアンケートデータのマージ
-        - 極端値処理（中央値±3MAD）
+### 5. 利他性要因分析 (`altruism_analysis/`) ※AI条件のみ
+- **従属変数**: 受け手への配分額（利他性の指標）
+- **説明変数**: 平等選好、テクノロジー信頼度、AI満足度
+- **統計手法**: 階層線形モデル（HLM）
+- **モデル比較**: ランダム切片 vs ランダム係数モデル
+- **診断**: 残差の正規性検定、QQプロット
 
-     2. モデリング:
-        ```r
-        # 最尤推定のコアコード例
-        utility <- function(alpha, beta, dictator, receiver) {
-          inequality <- receiver - dictator
-          dictator - alpha*pmax(inequality, 0) - beta*pmax(-inequality, 0)
-        }
-        
-        # 混合効果モデル
-        me_model <- lmer(alpha ~ condition + (1|participant.id), 
-                       data = preference_params)
-        ```
+### 6. 意思決定時間分析 (`time_analysis/`)
+- **データ**: PageTimesデータから意思決定所要時間を算出
+- **統計手法**: 線形混合効果モデル
+- **外れ値処理**: 上位1%を除外、ゼロ秒データの除去
+- **可視化**: 箱ひげ図、密度プロット
 
-     3. 診断検証:
-        - パラメータ推定の頑健性チェック（ブートストラップ法）
-        - モデル適合度（AIC/BIC）
-        - 残差分析（正規性・等分散性）
+### 7. 選択理由分析 (`choice_reason_analysis/`)
+- **分析対象**: アンケートによる選好の自己申告データ
+- **統計手法**: 相関分析、クラスタ分析、決定木分析
+- **条件間比較**: AI条件とコントロール条件での選好プロファイルの差異
+- **高度な分析**: 非線形関係の検証、閾値効果の分析
 
-     4. 結果可視化:
-        - 条件別α-β散布図（95%信頼楕円付き）
-        - 個人別パラメータの密度プロット
-        - パラメータ空間のクラスタ可視化（t-SNE法）
+### 8. 選択感度要因分析 (`lamda_genin/`)
+- **目的**: 選択の一貫性（λパラメータ）に影響する要因の特定
+- **説明変数**: AI理解度、AI評価、選好自己評価、意思決定時間
+- **統計手法**: 重回帰分析、構造方程式モデリング
+- **媒介分析**: AI理解度→選択感度→選好一貫性のパス解析
 
-   ### 利害対立ケースに限定した分析（Restricted Sample分析）
-   Klockmann et al. (2021) の手法に基づき、利害が完全に対立するケースに分析を限定した追加分析を実施
 
-   **分析の焦点**:
-   - 独裁者と受け手の利害が完全に相反する状況（X選択：独裁者利得 > 受け手利得，Y選択：独裁者利得 < 受け手利得）
-   - AI条件とコントロール条件での選択比率の差異
-   - 社会的選好パラメータ（α, β）の条件間比較
+### 分析の関連性
+各分析は独立して実行可能ですが、相互に関連しています：
+- **基礎分析**: `choice_analysis` → `payoff_avg_analysis`
+- **発展分析**: `social_preference_analysis` → `payoff_preference_analysis`
+- **深度分析**: `altruism_analysis`, `time_analysis`, `choice_reason_analysis`
 
-   **分析手法**:
-   ```r
-   # 利害対立ケースの抽出
-   conflict_data <- merged_data %>%
-     filter(
-       (player.payoff_dictator_X > player.payoff_receiver_X) &
-       (player.payoff_dictator_Y < player.payoff_receiver_Y)
-     )
+## 分析手法
 
-   # 条件間選択比率比較
-   prop_test_result <- conflict_data %>%
-     group_by(condition) %>%
-     summarise(y_ratio = mean(player.choice == "Y")) %>%
-     t.test(y_ratio ~ condition, data = .)
+### 主要統計手法
+- **記述統計**: 平均・分散・分布の可視化
+- **推測統計**: t検定、カイ二乗検定、ANOVA
+- **回帰分析**: 線形・ロジスティック・多項回帰
+- **混合効果モデル**: ランダム切片・ランダム係数モデル
+- **最尤推定**: 社会的選好パラメータの推定（Fehr-Schmidtモデル）
+- **クラスタ分析**: 選好パターンの類型化
+- **決定木分析**: 意思決定プロセスの構造解析
 
-   # Restricted Sample用モデル
-   restricted_model <- lmer(
-     alpha ~ condition + (1|participant.id),
-     data = filter(preference_params, scenario_type == "conflict")
-   )
-   ```
+## 注意事項
 
-   **理論的意義**:
-   - 純粋な利他性/利己性が発現する状況の隔離分析
-   - AI介入の影響が最も顕在化する場面の特定
-   - 先行研究（Engelmann & Strobel, 2004; Iriberri & Rey-Biel, 2011）との比較可能性向上
+### 個人記録としての性格
+- これは**個人的な研究記録**として作成したものです
+- 厳密な学術プロジェクトではなく、質問・引用等への対応はできません
+- 実験データは倫理的配慮により非公開
 
-   **解釈上の注意点**:
-   - 選択肢の効率性（合計利得）の影響を統制する必要
-   - 学習効果（ラウンド進行に伴う選好変化）の調整が不可欠
-   - サンプルサイズ減少に伴う検出力低下のリスク
+### 技術的制約
+- R 4.0.0以上を推奨
+- 分析結果の解釈には専門知識が必要
+- パラメータ推定値は実験設計に依存するため一般化に注意
 
-   **追加検証案**:
-   - 利害対立度合いの連続的測定（利得差の絶対値で層別化）
-   - 選択一貫性指標（Gini係数）による個人別分析
-   - マルチレベルモデルによる個人内変動の捕捉
+## 参考文献
 
-3. **条件間の平均の差の分析** (`payoff_avg_analysis/payoff_avg_analysis.R`)
-   - 使用変数：`player.payoff`（報酬額）
-   - 分析内容：
-     - 条件別の平均報酬額と標準偏差の計算
-     - t検定による条件間の報酬差の統計的検定
-   - データ処理：
-     - 参加者フィルタリング（`participant.visited == 1`）
-     - コントロール条件の16ラウンド目を除外
-     - 報酬データの抽出と統合
+Klockmann, V., Schenk-Hoppe, K. R., & Villeval, M. C. (2022). Artificial intelligence, ethics, and intergenerational responsibility. *Journal of Economic Behavior & Organization*, 203, 284-317.
 
-4. **選好の自己評価と実際の行動の整合性分析** (`payoff_preference_analysis/payoff_preference_analysis.R`)
-
-* 重要度: ★★★★★
-* 分析手法: 多項ロジスティック回帰分析
-* 使用変数:
-	+ 説明変数: selfish_preference, equality_preference, efficiency_preference, competitive_preference
-	+ 目的変数: player.choice（X/Y選択）
-	+ 調整変数: condition（AI/Control）, gender, age
-* 意義: 選好の自己申告が実際の選択行動とどの程度一致するかを検証。特にAI条件で申告選好と行動の乖離が大きい場合、AIの提示が認知バイアスを誘発している可能性を示唆。意思決定プロセスの解明に直結する核心分析。
-* **分析ステップ**:
-  1. 実験データとアンケートデータのマージ
-  2. 選択行動の因子化（Y選択を基準カテゴリ）
-  3. 自己評価変数の標準化（zスコア変換）
-  4. 条件×選好の交互作用項の追加
-  5. モデル選択（AIC/BICに基づく変数選択）
-  6. 多重共線性のチェック（VIF計算）
-  7. オッズ比と95%信頼区間の算出
-  8. 限界効果プロットの作成
-
-5. **利他性スコアの決定要因分析** (`altruism_analysis/altruism_analysis.R`) 
-
-* 重要度: ★★★★☆
-* 分析手法: 階層線形モデル（HLM）
-* 使用変数:
-	+ 従属変数: payoff_receiver（受け手への配分額）
-	+ 独立変数: equality_preference, tech_trust, ai_satisfaction
-	+ 個人効果: participant.id
-* 意義: 受け手への配分額を利他性の指標とし、個人の平等選好やAIへの信頼度が実際の利他的行動に与える影響を定量化。実験介入効果のメカニズム解明に不可欠。
-＊AI条件のみ
-* **分析ステップ**:
-  1. 個人内平均利他性スコアの算出
-  2. 変数のセンタリング（グループ平均中心化）
-  3. ランダム切片モデルの構築
-  4. ランダム係数モデルへの拡張
-  5. モデル比較（尤度比検定）
-  6. 残差の正規性検定（QQプロット）
-  7. 個人間変動の可視化（ランダム効果プロット）
-  8. 効果量の計算（ICC）
-
-6. **条件と所要時間の分析** (`time_analysis/time_analysis.R`)
-
-* 重要度: ★★★★☆  
-* 分析手法: 線形混合効果モデル / マン・ホイットニーU検定  
-* 使用変数:  
-  + 従属変数: decision_time_sec（意思決定所要時間）  
-  + 独立変数: condition（AI/Control）  
-  + 調整変数: round_number, gender, age  
-  + ランダム効果: participant.id  
-
-* **意義**:  
-  - AI条件が意思決定速度に与える影響を定量化  
-  - 時間圧力が利他性スコアに与える影響の媒介分析  
-  - 実験操作の認知負荷検証（過度な時間延長は学習効果低下のリスク）  
-
-* **分析ステップ**:  
-  1. ページ遷移データの前処理  
-  2. メインデータとのマージ
-  3. 外れ値処理（中央値±3MAD）
-  4. 混合効果モデル構築
-  5. 残差診断（正規性・等分散性）  
-  6. 効果量計算（Cohen's d）  
-  7. 交互作用効果検証（条件×ラウンド数）  
-  8. 結果可視化（箱ひげ図＋個別データポイント）  
-
-* **解釈上の注意点**:  
-  - 所要時間が短い≠意思決定の質が低い（速度と正確性のトレードオフを考慮）  
-  - ラウンド進行に伴う学習効果を統計的に調整する必要  
-  - マウス操作時間と認知処理時間を区別できない測定限界  
-
-* **追加検証案**:  
-  - 時間圧力が選択一貫性に与える影響（Gini係数による評価）  
-  - 初期意思決定時間と最終選択の関連性分析  
-  - 時間データと眼球運動データのマルチモーダル分析
-
-7. **選択理由の条件間比較** (`choice_reason_analysis/choice_reason_analysis.R`)
-
-* 重要度: ★★★★☆  
-* 分析手法: 多元分散分析（MANOVA）＋事後t検定  
-* 使用変数:  
-  + 従属変数: selfish_preference, equality_preference, efficiency_preference, competitive_preference  
-  + 独立変数: condition（AI/Control）  
-  + 調整変数: gender, age, final_total_payoff  
-
-* **意義**:  
-  - 自己申告選好と実際の選択行動の乖離の条件間差異を検出
-  - AI条件における社会的望ましさバイアスの定量化
-  - 選好の多次元的構造の可視化（個人内選好トレードオフの分析）
-
-* **分析ステップ**:  
-  1. 選好変数の正規性検定（Shapiro-Wilk検定）
-  2. MANOVAによる多変量効果の検定
-  3. 条件別平均値の比較（Holm-Bonferroni補正）
-  4. 効果量計算（Cohen's d）
-  5. 選好プロファイルのクラスタ分析：
-   ```r
-   # MANOVA実施例
-   manova_model <- manova(cbind(selfish_preference, equality_preference, 
-                              efficiency_preference, competitive_preference) ~ condition,
-                        data = survey_data)
-                        
-   # 事後t検定（Holm補正）
-   lapply(c("selfish","equality","efficiency","competitive"), function(pref) {
-     t.test(get(paste0(pref,"_preference")) ~ condition, 
-            data = survey_data,
-            alternative = "two.sided") %>%
-       broom::tidy()
-   })
-   
-   # 選好プロファイル可視化
-   ggplot(survey_data, aes(x=condition, fill=condition)) +
-     geom_violin(aes(y=selfish_preference), alpha=0.3) +
-     geom_violin(aes(y=equality_preference), alpha=0.3) +
-     facet_wrap(~preference_type) +
-     theme_minimal()
-   ```
-
-* **解釈上の注意点**:  
-  - 回答の中央化バイアス（neutral midpoint clustering）
-  - 社会的望ましさバイアス（特にAI条件で顕著化する可能性）
-  - 選好間の相関（例：効率性選好と競争選好の負相関）
-
-* **追加検証案**:  
-  - 選好一貫性指標（個人内標準偏差）の条件間比較
-  - 選好と神経活動指標（fMRI/EEG）の相関分析
-  - 選好の時間的安定性テスト（再テスト信頼性）
-
-* **理論的意義**:  
-  - Klockmann et al. (2022) のstated preference分析を拡張した多次元比較
-  - 認知的ディソナンス理論に基づく「言行不一致」のメカニズム解明
-  - 文化横断的比较のための選好測定基準の確立
-
-* **予備分析結果**:  
-  暫定結果（n=150）ではAI条件で以下が観察：
-  - 平等選好の有意な上昇（d=0.32, p<.05）
-  - 効率性選好と利己性選好の負の相関増大（r=-.41→-.57）
-  - 競争選好の分散拡大（Levene検定 p<.01）
-
-8. **選択感度（λ）とアンケート回答の関連分析** (`lambda_survey_analysis/lambda_survey_analysis.R`)
-
-* 重要度: ★★★★★
-* 分析手法: 重回帰分析 / 構造方程式モデリング（SEM）
-* 使用変数:
-  + 従属変数: lambda（選択感度パラメータ）
-  + 独立変数: 
-    - AI理解度関連: ai_understanding, rf_understanding
-    - AI評価関連: ai_satisfaction, prediction_accuracy, tech_trust
-    - 選好自己評価: selfish_preference, equality_preference, efficiency_preference, competitive_preference
-    - 選択の時間: decision_time_sec
-  + 調整変数: condition（AI/Control）, gender, age
-
-* **意義**:
-  - 選択の一貫性（λ）を低下させる要因の特定
-  - AI介入が意思決定プロセスに与える影響の心理的メカニズム解明
-  - 選好の自己認識と実際の選択行動の乖離メカニズムの解明
-
-* **分析ステップ**:
-  1. λパラメータと各アンケート項目の相関分析
-  2. AI条件とコントロール条件での相関構造の比較
-  3. λを目的変数とする重回帰分析
-  4. 媒介分析（AI理解度→選択感度→選好一貫性）
-  5. 構造方程式モデルによるパス解析
-  6. 交互作用効果の検証
-  7. モデル診断と頑健性チェック
-  8. 結果の可視化
-
-* **理論的仮説**:
-  1. AI理解度（ai_understanding, rf_understanding）
-     - 高い理解度→選択感度（λ）の上昇
-     - AI学習の仕組みを理解することで、より一貫した選択行動
-
-  2. AI評価（ai_satisfaction, prediction_accuracy, tech_trust）
-     - 高い評価→選択感度（λ）の低下
-     - AIへの過度な意識が直感的判断を妨げる可能性
-
-  3. 選好自己評価との関係
-     - 明確な選好意識→選択感度（λ）の上昇
-     - 自己の選好を明確に認識している参加者ほど一貫した選択
-
-* **解釈上の注意点**:
-  - λの低下が必ずしも意思決定の質の低下を意味しない
-  - AI条件特有の認知負荷の影響を考慮
-  - 選好の多次元性による交絡効果の可能性
-
-* **追加検証案**:
-  - 時系列での選択感度変化分析
-  - 個人特性（リスク態度等）との関連
-  - 神経科学的指標との統合分析
-
-* **予備分析での観察事項**:
-  - AI理解度とλの正の相関（r = 0.34, p < .05）
-  - tech_trustとλの負の相関（r = -0.28, p < .05）
-  - 選好自己評価の一貫性とλの正の相関（r = 0.41, p < .01）
