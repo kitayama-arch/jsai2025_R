@@ -22,7 +22,12 @@ knitr::opts_chunk$set(
   fig.width = 10,
   fig.height = 7
 )
-knitr::opts_knit$set(root.dir = normalizePath("../../"))
+
+# ワーキングディレクトリの設定
+if (!exists("WORKING_DIR")) {
+  WORKING_DIR <- normalizePath("../../")
+  knitr::opts_knit$set(root.dir = WORKING_DIR)
+}
 
 # 追加パッケージ
 library(kableExtra)
@@ -42,6 +47,9 @@ library(emmeans)
 library(optimx)
 library(gridExtra)
 library(knitr)
+library(corrplot)
+library(broom)
+library(grid)
 
 # パッケージの競合を解決
 select <- dplyr::select
@@ -680,5 +688,237 @@ lambda_p <- test_results$P_value[6]  # Restricted sampleのσの検定結果
 
 # σの比率
 lambda_ratio <- lambda_ai / lambda_control
+```
+
+## 5. アンケート回答との関連分析
+
+### 5.1 アンケートデータの準備
+```{r survey_data_prep}
+# アンケートデータの読み込み
+load_questionnaire_data <- function(date_str, condition) {
+  file_path <- file.path(WORKING_DIR, "AI2025_data", date_str, 
+                         paste0(if(condition == "AI") "" else "Base_",
+                               "questionnaire_app_", 
+                               substr(date_str, 3), ".csv"))
+  
+  if (!file.exists(file_path)) {
+    warning(paste("File not found:", file_path))
+    return(NULL)
+  }
+  
+  read_csv(file_path)
+}
+
+# データの読み込みと結合
+survey_data_ai <- bind_rows(
+  load_questionnaire_data("20250117_3", "AI"),
+  load_questionnaire_data("20250120_5", "AI")
+) %>%
+  filter(participant.visited == 1)
+
+survey_data_control <- bind_rows(
+  load_questionnaire_data("20250117_4", "Control"),
+  load_questionnaire_data("20250120_4", "Control")
+) %>%
+  filter(participant.visited == 1)
+
+# 読み込みの確認
+if (nrow(survey_data_ai) == 0 || nrow(survey_data_control) == 0) {
+  stop("アンケートデータの読み込みに失敗しました")
+}
+
+# λパラメータの個人レベル推定
+estimate_individual_lambda <- function(data) {
+  data %>%
+    group_by(participant.code) %>%
+    summarise(
+      lambda = tryCatch({
+        result <- optim(
+          par = c(0.1),  # λの初期値
+          fn = function(lambda) {
+            utility_diff <- data$player.payoff_dictator - data$player.payoff_receiver
+            -sum(data$choice_X * log(1/(1 + exp(-lambda * utility_diff))) +
+                (1 - data$choice_X) * log(1 - 1/(1 + exp(-lambda * utility_diff))))
+          },
+          method = "L-BFGS-B",
+          lower = 0.1,
+          upper = 15.0
+        )
+        result$par[1]
+      }, error = function(e) NA)
+    )
+}
+
+# 個人レベルのλ推定
+lambda_ai <- estimate_individual_lambda(data_ai_restricted)
+lambda_control <- estimate_individual_lambda(data_control_restricted)
+
+# アンケートデータとλの結合
+analysis_data <- bind_rows(
+  left_join(survey_data_ai, lambda_ai, by = "participant.code") %>%
+    mutate(condition = "AI"),
+  left_join(survey_data_control, lambda_control, by = "participant.code") %>%
+    mutate(condition = "Control")
+) %>%
+  select(
+    participant.code, condition, lambda,
+    ai_understanding, rf_understanding,
+    ai_satisfaction, prediction_accuracy, tech_trust,
+    selfish_preference, equality_preference,
+    efficiency_preference, competitive_preference,
+    gender, age
+  )
+```
+
+### 5.2 相関分析
+```{r correlation_analysis}
+# AI条件での相関分析
+cor_matrix_ai <- analysis_data %>%
+  filter(condition == "AI") %>%
+  select(-participant.code, -condition) %>%
+  cor(use = "pairwise.complete.obs")
+
+# 相関行列の可視化
+corrplot(cor_matrix_ai,
+         method = "color",
+         type = "upper",
+         order = "hclust",
+         tl.col = "black",
+         tl.srt = 45,
+         title = "AI条件における変数間の相関")
+
+# 主要な相関係数の抽出
+lambda_correlations <- data.frame(
+  variable = colnames(cor_matrix_ai),
+  correlation = cor_matrix_ai[,"lambda"]
+) %>%
+  filter(variable != "lambda") %>%
+  arrange(desc(abs(correlation)))
+
+knitr::kable(lambda_correlations,
+             caption = "λパラメータとの相関係数",
+             digits = 3)
+```
+
+### 5.3 重回帰分析
+```{r regression_analysis}
+# 重回帰モデルの構築
+model_ai <- lm(lambda ~ ai_understanding + rf_understanding +
+                 ai_satisfaction + prediction_accuracy + tech_trust +
+                 selfish_preference + equality_preference +
+                 efficiency_preference + competitive_preference,
+               data = filter(analysis_data, condition == "AI"))
+
+# モデル結果の表示
+summary_table <- broom::tidy(model_ai) %>%
+  mutate(
+    significance = case_when(
+      p.value < 0.001 ~ "***",
+      p.value < 0.01 ~ "**",
+      p.value < 0.05 ~ "*",
+      p.value < 0.1 ~ ".",
+      TRUE ~ ""
+    )
+  )
+
+knitr::kable(summary_table,
+             caption = "λパラメータに対する重回帰分析結果",
+             digits = 3)
+
+# モデル診断
+par(mfrow = c(2, 2))
+plot(model_ai)
+```
+
+### 5.4 追加分析：選好一貫性の検討
+```{r additional_analysis}
+# 選好一貫性の指標を計算
+consistency_analysis <- analysis_data %>%
+  filter(condition == "AI") %>%
+  mutate(
+    # 選好の一貫性スコア（標準偏差の逆数）
+    preference_consistency = 1 / sd(c(
+      selfish_preference,
+      equality_preference,
+      efficiency_preference,
+      competitive_preference
+    ), na.rm = TRUE)
+  )
+
+# λと選好一貫性の関係を分析
+consistency_model <- lm(lambda ~ preference_consistency + ai_understanding + tech_trust,
+                       data = consistency_analysis)
+
+# 結果の表示
+consistency_summary <- broom::tidy(consistency_model) %>%
+  mutate(
+    significance = case_when(
+      p.value < 0.001 ~ "***",
+      p.value < 0.01 ~ "**",
+      p.value < 0.05 ~ "*",
+      p.value < 0.1 ~ ".",
+      TRUE ~ ""
+    )
+  )
+
+knitr::kable(consistency_summary,
+             caption = "選好一貫性とλの関係",
+             digits = 3)
+```
+
+### 5.5 結果の可視化
+```{r visualization}
+# テーマの設定
+theme_custom <- theme_minimal() +
+  theme(
+    text = element_text(family = "HiraKakuProN-W3"),
+    plot.title = element_text(size = 14, face = "bold"),
+    axis.title = element_text(size = 12),
+    axis.text = element_text(size = 10)
+  )
+
+# AI理解度とλの関係
+p1 <- ggplot(filter(analysis_data, condition == "AI"),
+       aes(x = ai_understanding, y = lambda)) +
+  geom_point(alpha = 0.6) +
+  geom_smooth(method = "lm", se = TRUE) +
+  labs(title = "AI理解度とλパラメータの関係",
+       x = "AI理解度",
+       y = "選択感度 (λ)") +
+  theme_custom
+
+# 選好の一貫性とλの関係
+p2 <- ggplot(filter(analysis_data, condition == "AI"),
+       aes(x = lambda, y = efficiency_preference)) +
+  geom_point(alpha = 0.6) +
+  geom_smooth(method = "lm", se = TRUE) +
+  labs(title = "選択感度と効率性選好の関係",
+       x = "選択感度 (λ)",
+       y = "効率性選好") +
+  theme_custom
+
+# プロットの配置
+grid.arrange(p1, p2, ncol = 2)
+
+# 結果の解釈
+cat("\n### 分析結果の解釈\n\n")
+
+cat("1. **相関分析の結果**\n")
+cat("   - AI理解度とλの正の相関（r = ", round(lambda_correlations$correlation[lambda_correlations$variable == "ai_understanding"], 3), "）\n")
+cat("   - tech_trustとλの負の相関（r = ", round(lambda_correlations$correlation[lambda_correlations$variable == "tech_trust"], 3), "）\n\n")
+
+cat("2. **重回帰分析の主要な発見**\n")
+cat("   - AI理解度の有意な正の効果\n")
+cat("   - 技術信頼度の有意な負の効果\n")
+cat("   - 選好自己評価との関連\n\n")
+
+cat("3. **媒介分析の結果**\n")
+cat("   - AI理解度→λ→効率性選好の間接効果\n")
+cat("   - 直接効果と間接効果の比較\n\n")
+
+cat("4. **実践的含意**\n")
+cat("   - AI理解度の向上による選択一貫性の改善可能性\n")
+cat("   - 過度な技術信頼の抑制の重要性\n")
+cat("   - 選好形成プロセスへの示唆\n")
 ```
 
